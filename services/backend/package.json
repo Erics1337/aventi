@@ -1,0 +1,12 @@
+{
+  "name": "@aventi/backend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "uv run --project . python -m aventi_backend.main",
+    "worker": "uv run --project . python -m aventi_backend.worker.main",
+    "lint": "uv run --project . ruff check src tests",
+    "typecheck": "uv run --project . mypy src",
+    "test": "uv run --project . pytest"
+  }
+}

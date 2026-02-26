@@ -1,0 +1,28 @@
+project_id = "aventi-local"
+
+[api]
+enabled = true
+port = 54331
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[auth]
+enable_anonymous_sign_ins = true
+
+[db]
+port = 54332
+shadow_port = 54333
+major_version = 15
+
+[studio]
+enabled = true
+port = 54334
+
+[inbucket]
+enabled = true
+port = 54335
+
+[analytics]
+enabled = true
+port = 54336

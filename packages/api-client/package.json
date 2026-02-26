@@ -1,0 +1,17 @@
+{
+  "name": "@aventi/api-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@aventi/contracts": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --emitDeclarationOnly",
+    "lint": "echo 'No lint configured for @aventi/api-client yet'",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo 'No tests for @aventi/api-client yet'"
+  }
+}

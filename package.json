@@ -1,0 +1,23 @@
+{
+  "name": "aventi",
+  "private": true,
+  "packageManager": "pnpm@10.13.1",
+  "scripts": {
+    "dev": "dotenv -c -- turbo run dev --parallel",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "backend:sync": "cd services/backend && uv sync --extra dev",
+    "backend:dev": "cd services/backend && uv run python -m aventi_backend.main",
+    "backend:worker": "cd services/backend && uv run python -m aventi_backend.worker.main",
+    "backend:test": "cd services/backend && uv run pytest",
+    "backend:ingest": "cd services/backend && uv run aventi-manual-ingest"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.14"
+  },
+  "dependencies": {
+    "dotenv-cli": "^11.0.0"
+  }
+}

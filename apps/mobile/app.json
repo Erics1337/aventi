@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "Aventi",
+    "slug": "aventi",
+    "scheme": "aventi",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "assetBundlePatterns": ["**/*"],
+    "plugins": [
+      "expo-router",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Aventi uses your location to personalize local events and nightlife discovery."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.aventi.app"
+    },
+    "android": {
+      "package": "com.aventi.app"
+    }
+  }
+}
