@@ -17,6 +17,8 @@ import { EventDetailModal } from '../components/EventDetailModal';
 import { FeedActionRail } from '../components/FeedActionRail';
 import { GlassPanel } from '../components/GlassPanel';
 import { LoadingConstruct } from '../components/LoadingConstruct';
+import { Ionicons } from '@expo/vector-icons';
+
 import { aventiApi } from '../lib/api';
 import { useAuthSession } from '../lib/auth-session';
 import { useLocationGate } from '../lib/location-gate';
@@ -306,8 +308,8 @@ export default function HomeScreen() {
     setFeedCursor(null);
   };
 
-  const handleOpenLocationSetup = () => {
-    router.push('/onboarding/location');
+  const handleOpenProfile = () => {
+    router.push('/profile');
   };
 
   const handleOpenFavorites = () => {
@@ -317,42 +319,6 @@ export default function HomeScreen() {
     }
     router.push('/favorites');
   };
-
-  const handleAuthAction = () => {
-    if (auth.isFullAccount) {
-      void auth.signOut().catch(() => setUiNotice('Could not sign out right now.'));
-      return;
-    }
-    auth.openAuthPrompt(auth.isAnonymousUser ? 'sync' : 'welcome');
-  };
-
-  const handlePremiumPurchase = () => {
-    if (!auth.requireFullAccount('premium-purchase')) return;
-    setUiNotice('Premium purchase flow stub (Stripe is deferred in PRD v1).');
-  };
-
-  const handlePremiumRestore = () => {
-    if (!auth.requireFullAccount('premium-restore')) return;
-    setUiNotice('Premium restore flow stub. Wire restore logic next.');
-  };
-
-  const authModeLabel = auth.isFullAccount
-    ? 'Account'
-    : auth.isAnonymousUser
-      ? 'Guest (Anonymous)'
-      : auth.isLocalGuestMode
-        ? 'Guest (Local)'
-        : 'Not Signed In';
-
-  const authModeDescription = auth.isFullAccount
-    ? auth.email ?? 'Signed in'
-    : auth.isAnonymousUser
-      ? 'Temporary Supabase guest session active. Upgrade later without losing this profile.'
-      : auth.isLocalGuestMode
-        ? 'Browsing locally without a Supabase guest session. Some data cannot persist.'
-        : 'Choose guest mode or sign in to start.';
-
-  const authActionLabel = auth.isFullAccount ? 'Sign Out' : auth.isAnonymousUser ? 'Upgrade' : 'Sign In';
 
   const statusLine = !appUnlocked
     ? 'Choose guest mode or sign in to begin discovery'
@@ -487,94 +453,28 @@ export default function HomeScreen() {
 
   return (
     <View className="flex-1 bg-black px-4 pt-14">
-      <View className="mb-4">
-        <Text className="text-xs uppercase tracking-[3px] text-white/55">Aventi</Text>
-        <Text className="mt-2 text-3xl font-bold uppercase tracking-[2px] text-white">{headerLabel}</Text>
+      <View className="mb-2 flex-row items-center justify-between">
+        <View>
+          <Text className="text-xs uppercase tracking-[3px] text-white/55">Aventi</Text>
+          <Text className="mt-2 text-2xl font-bold uppercase tracking-[2px] text-white">
+            {headerLabel}
+          </Text>
+        </View>
+        <View className="flex-row gap-3">
+          <Pressable
+            onPress={handleOpenFavorites}
+            className="h-10 w-10 items-center justify-center rounded-full bg-white/10 active:scale-95"
+          >
+            <Ionicons name="heart-outline" size={24} color="white" />
+          </Pressable>
+          <Pressable
+            onPress={handleOpenProfile}
+            className="h-10 w-10 items-center justify-center rounded-full bg-white/10 active:scale-95"
+          >
+            <Ionicons name="person-outline" size={22} color="white" />
+          </Pressable>
+        </View>
       </View>
-
-      <GlassPanel className="mb-3">
-        <View className="flex-row items-start justify-between gap-4">
-          <View className="flex-1">
-            <Text className="text-xs uppercase tracking-[2px] text-white/60">Identity Mode</Text>
-            <Text className="mt-1 text-base font-semibold text-white">{authModeLabel}</Text>
-            <Text className="mt-1 text-xs leading-5 text-white/65">{authModeDescription}</Text>
-            {!auth.isFullAccount ? (
-              <Text className="mt-2 text-[11px] uppercase tracking-[1px] text-white/45">
-                Premium purchase/restore requires a full account. Anonymous guests stay on free tier.
-              </Text>
-            ) : null}
-          </View>
-          <View className="gap-2">
-            <Pressable
-              onPress={handleOpenFavorites}
-              className="rounded-full border border-white/15 bg-white/5 px-4 py-3 active:scale-95"
-            >
-              <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white/90">Favorites</Text>
-            </Pressable>
-            <Pressable
-              onPress={handleAuthAction}
-              className="rounded-full border border-white/15 bg-white/10 px-4 py-3 active:scale-95"
-            >
-              <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white">
-                {authActionLabel}
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-        <View className="mt-4 flex-row gap-2">
-          <Pressable
-            onPress={handlePremiumPurchase}
-            className="flex-1 rounded-2xl border border-white/12 bg-white/8 px-4 py-3 active:scale-[0.99]"
-          >
-            <Text className="text-center text-[11px] font-semibold uppercase tracking-[1.2px] text-white/92">
-              Premium Upgrade
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={handlePremiumRestore}
-            className="flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 active:scale-[0.99]"
-          >
-            <Text className="text-center text-[11px] font-semibold uppercase tracking-[1.2px] text-white/82">
-              Restore Premium
-            </Text>
-          </Pressable>
-        </View>
-      </GlassPanel>
-
-      <GlassPanel className="mb-4">
-        <View className="flex-row items-center justify-between gap-4">
-          <View className="flex-1">
-            <Text className="text-xs uppercase tracking-[2px] text-white/60">Discovery Status</Text>
-            <Text className="mt-1 text-base font-semibold text-white">{statusLine}</Text>
-            {bootstrapQuery.isError && serverCallsEnabled ? (
-              <Text className="mt-2 text-xs uppercase tracking-[1px] text-rose-300/80">
-                Bootstrap request failed (dev auth bypass may still allow feed calls)
-              </Text>
-            ) : null}
-            {location.profileSyncError ? (
-              <Text className="mt-2 text-xs uppercase tracking-[1px] text-amber-200/80">
-                Profile location sync warning: {location.profileSyncError}
-              </Text>
-            ) : null}
-            {localGuestFallback ? (
-              <Text className="mt-2 text-xs uppercase tracking-[1px] text-amber-200/85">
-                Local guest mode: browsing works, but server-backed sync needs Supabase guest auth.
-              </Text>
-            ) : null}
-            {uiNotice ? (
-              <Text className="mt-2 text-xs leading-5 text-emerald-200/90">{uiNotice}</Text>
-            ) : null}
-          </View>
-          <Pressable
-            onPress={handleOpenLocationSetup}
-            className="rounded-full border border-white/15 bg-white/10 px-4 py-3 active:scale-95"
-          >
-            <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white">
-              Location &amp; Travel
-            </Text>
-          </Pressable>
-        </View>
-      </GlassPanel>
 
       <View className="mb-4 flex-row flex-wrap gap-2">
         {[
@@ -619,11 +519,11 @@ export default function HomeScreen() {
               Grant device location, retry after changing Settings, and optionally choose a Travel Mode override.
             </Text>
             <Pressable
-              onPress={handleOpenLocationSetup}
+              onPress={handleOpenProfile}
               className="mt-4 self-start rounded-full border border-white/15 bg-white/10 px-4 py-3 active:scale-95"
             >
               <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white">
-                Open Location Step
+                Open Profile to configure
               </Text>
             </Pressable>
           </GlassPanel>

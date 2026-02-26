@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { router } from 'expo-router';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { EventCard as EventCardModel, FavoritesResponse } from '@aventi/contracts';
+import type { EventCard as EventCardModel, FavoritesResponse, ReportReason } from '@aventi/contracts';
 import { EventDetailModal } from '../components/EventDetailModal';
 import { GlassPanel } from '../components/GlassPanel';
 import { LoadingConstruct } from '../components/LoadingConstruct';
@@ -19,14 +19,31 @@ function formatEventTime(event: EventCardModel) {
   });
 }
 
+const REPORT_REASON_OPTIONS: Array<{ value: ReportReason; label: string; description: string }> = [
+  { value: 'invalid', label: 'Invalid', description: 'Wrong listing, broken info, or clearly bad data' },
+  { value: 'cancelled', label: 'Cancelled', description: 'The event is no longer happening' },
+  { value: 'duplicate', label: 'Duplicate', description: 'This appears multiple times in the feed' },
+  { value: 'unsafe', label: 'Unsafe', description: 'Unsafe, abusive, or harmful listing content' },
+  { value: 'other', label: 'Other', description: 'Something else is wrong' },
+];
+
 interface FavoriteEventRowProps {
   event: EventCardModel;
   isRemoving: boolean;
+  isReporting: boolean;
   onOpen: (event: EventCardModel) => void;
   onRemove: (eventId: string) => void;
+  onReport: (event: EventCardModel) => void;
 }
 
-function FavoriteEventRow({ event, isRemoving, onOpen, onRemove }: FavoriteEventRowProps) {
+function FavoriteEventRow({
+  event,
+  isRemoving,
+  isReporting,
+  onOpen,
+  onRemove,
+  onReport,
+}: FavoriteEventRowProps) {
   return (
     <GlassPanel className="mb-3">
       <View className="flex-row items-start justify-between gap-4">
@@ -72,6 +89,21 @@ function FavoriteEventRow({ event, isRemoving, onOpen, onRemove }: FavoriteEvent
               {isRemoving ? 'Removing...' : 'Remove'}
             </Text>
           </Pressable>
+          <Pressable
+            disabled={isReporting}
+            onPress={() => onReport(event)}
+            className={`rounded-xl border px-3 py-3 ${
+              isReporting ? 'border-white/5 bg-white/5' : 'border-white/10 bg-white/5 active:scale-95'
+            }`}
+          >
+            <Text
+              className={`text-center text-[11px] font-semibold uppercase tracking-[1.2px] ${
+                isReporting ? 'text-white/40' : 'text-white/80'
+              }`}
+            >
+              {isReporting ? 'Sending...' : 'Report'}
+            </Text>
+          </Pressable>
         </View>
       </View>
     </GlassPanel>
@@ -114,6 +146,9 @@ export default function FavoritesScreen() {
   const [uiNotice, setUiNotice] = useState<string | null>(null);
   const [detailVisible, setDetailVisible] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<EventCardModel | null>(null);
+  const [reportingEvent, setReportingEvent] = useState<EventCardModel | null>(null);
+  const [reportReason, setReportReason] = useState<ReportReason>('invalid');
+  const [reportDetails, setReportDetails] = useState('');
   const favoritesQueryKey = ['favorites', auth.session?.user.id ?? 'no-session'] as const;
 
   useEffect(() => {
@@ -157,6 +192,25 @@ export default function FavoritesScreen() {
     },
   });
 
+  const reportMutation = useMutation({
+    mutationFn: (payload: { eventId: string; reason: ReportReason; details?: string }) =>
+      aventiApi.reportEvent(payload.eventId, { reason: payload.reason, details: payload.details }),
+    onError: () => {
+      setUiNotice('Could not submit the report right now.');
+    },
+    onSuccess: (result) => {
+      if (result.hidden) {
+        setUiNotice(`Report submitted. This event is now hidden after ${result.reportCount} reports.`);
+      } else {
+        setUiNotice(`Report submitted (${result.reportCount} total reports).`);
+      }
+      setReportingEvent(null);
+      setReportReason('invalid');
+      setReportDetails('');
+      void queryClient.invalidateQueries({ queryKey: ['favorites'] });
+    },
+  });
+
   const favoriteIds = favoritesQuery.data?.items ?? [];
   const favoriteEvents = favoritesQuery.data?.events ?? [];
 
@@ -187,12 +241,44 @@ export default function FavoritesScreen() {
     setDetailVisible(true);
   };
 
+  const handleOpenReport = (event: EventCardModel) => {
+    if (!auth.requireSessionBackedGuestOrAccount('report')) {
+      setUiNotice('Start a guest session or sign in to report events.');
+      return;
+    }
+    setDetailVisible(false);
+    setSelectedEvent(null);
+    setReportReason('invalid');
+    setReportDetails('');
+    setReportingEvent(event);
+  };
+
+  const handleCloseReport = () => {
+    if (reportMutation.isPending) return;
+    setReportingEvent(null);
+    setReportReason('invalid');
+    setReportDetails('');
+  };
+
   const handleRemoveFavorite = (eventId: string) => {
     if (!auth.requireSessionBackedGuestOrAccount('favorites')) {
       setUiNotice('Start a guest session or sign in to manage Favorites.');
       return;
     }
     removeFavoriteMutation.mutate(eventId);
+  };
+
+  const handleSubmitReport = () => {
+    if (!reportingEvent) return;
+    if (!auth.requireSessionBackedGuestOrAccount('report')) {
+      setUiNotice('Start a guest session or sign in to report events.');
+      return;
+    }
+    reportMutation.mutate({
+      eventId: reportingEvent.id,
+      reason: reportReason,
+      details: reportDetails.trim() ? reportDetails.trim() : undefined,
+    });
   };
 
   const identityMode = auth.isFullAccount ? 'Account' : auth.isAnonymousUser ? 'Guest (Anonymous)' : 'Guest (Local)';
@@ -334,8 +420,12 @@ export default function FavoritesScreen() {
                     key={event.id}
                     event={event}
                     isRemoving={removeFavoriteMutation.isPending && removeFavoriteMutation.variables === event.id}
+                    isReporting={
+                      reportMutation.isPending && reportMutation.variables?.eventId === event.id
+                    }
                     onOpen={handleOpenDetails}
                     onRemove={handleRemoveFavorite}
+                    onReport={handleOpenReport}
                   />
                 ))}
               </>
@@ -362,6 +452,106 @@ export default function FavoritesScreen() {
           </View>
         </ScrollView>
       )}
+
+      <Modal
+        visible={Boolean(reportingEvent)}
+        animationType="fade"
+        transparent
+        onRequestClose={handleCloseReport}
+      >
+        <View className="flex-1 justify-end bg-black/70 px-4 pb-6">
+          <View className="max-h-[80%] rounded-[24px] border border-white/10 bg-black px-4 py-4">
+            <View className="mb-3 flex-row items-start justify-between gap-3">
+              <View className="flex-1">
+                <Text className="text-xs uppercase tracking-[2px] text-white/55">Report Event</Text>
+                <Text className="mt-1 text-lg font-semibold text-white" numberOfLines={2}>
+                  {reportingEvent?.title ?? 'Selected event'}
+                </Text>
+                <Text className="mt-1 text-xs leading-5 text-white/65">
+                  Reports are tied to guest-auth or full accounts to enforce unique reporters.
+                </Text>
+              </View>
+              <Pressable
+                disabled={reportMutation.isPending}
+                onPress={handleCloseReport}
+                className="rounded-full border border-white/10 bg-white/5 px-3 py-2 active:scale-95"
+              >
+                <Text className="text-[10px] font-semibold uppercase tracking-[1px] text-white/85">Close</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text className="mb-2 text-xs uppercase tracking-[2px] text-white/55">Reason</Text>
+              <View className="gap-2">
+                {REPORT_REASON_OPTIONS.map((option) => {
+                  const selected = reportReason === option.value;
+                  return (
+                    <Pressable
+                      key={option.value}
+                      disabled={reportMutation.isPending}
+                      onPress={() => setReportReason(option.value)}
+                      className={`rounded-2xl border px-4 py-3 ${
+                        selected ? 'border-amber-200/35 bg-amber-300/10' : 'border-white/10 bg-white/5 active:scale-[0.99]'
+                      }`}
+                    >
+                      <Text className={`text-sm font-semibold ${selected ? 'text-amber-100/95' : 'text-white/90'}`}>
+                        {option.label}
+                      </Text>
+                      <Text className={`mt-1 text-xs leading-4 ${selected ? 'text-amber-100/70' : 'text-white/60'}`}>
+                        {option.description}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+
+              <Text className="mb-2 mt-4 text-xs uppercase tracking-[2px] text-white/55">
+                Notes (Optional)
+              </Text>
+              <TextInput
+                editable={!reportMutation.isPending}
+                placeholder="Add context (optional)"
+                placeholderTextColor="rgba(255,255,255,0.35)"
+                multiline
+                numberOfLines={4}
+                textAlignVertical="top"
+                value={reportDetails}
+                onChangeText={setReportDetails}
+                className="min-h-[96px] rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white"
+              />
+
+              <View className="mt-4 flex-row gap-3 pb-1">
+                <Pressable
+                  disabled={reportMutation.isPending}
+                  onPress={handleCloseReport}
+                  className="flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 active:scale-[0.99]"
+                >
+                  <Text className="text-center text-xs font-semibold uppercase tracking-[1.2px] text-white/85">
+                    Cancel
+                  </Text>
+                </Pressable>
+                <Pressable
+                  disabled={reportMutation.isPending}
+                  onPress={handleSubmitReport}
+                  className={`flex-1 rounded-2xl border px-4 py-3 ${
+                    reportMutation.isPending
+                      ? 'border-white/5 bg-white/5'
+                      : 'border-amber-200/30 bg-amber-300/10 active:scale-[0.99]'
+                  }`}
+                >
+                  <Text
+                    className={`text-center text-xs font-semibold uppercase tracking-[1.2px] ${
+                      reportMutation.isPending ? 'text-white/40' : 'text-amber-100/95'
+                    }`}
+                  >
+                    {reportMutation.isPending ? 'Sending...' : 'Submit Report'}
+                  </Text>
+                </Pressable>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       <EventDetailModal event={selectedEvent} visible={detailVisible} onClose={() => setDetailVisible(false)} />
     </View>
