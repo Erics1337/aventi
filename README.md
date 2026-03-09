@@ -38,17 +38,28 @@ cd services/backend && uv sync
 
 ### Run Services
 
-Start the mobile app and any JS/TS tasks via Turborepo:
+Start the mobile app, backend API, and worker via Turborepo:
 
 ```bash
 pnpm dev
 ```
 
-In separate terminals, start the backend API and worker:
+If you only want mobile + backend API (no worker), use:
 
 ```bash
-uv run --project services/backend python -m aventi_backend.main
+pnpm dev:lite
+```
+
+Start the worker separately (optional, if not using `pnpm dev`):
+
+```bash
 uv run --project services/backend python -m aventi_backend.worker.main
+```
+
+Or start mobile + backend API + worker together:
+
+```bash
+pnpm dev:full
 ```
 
 ## Useful run commands
@@ -62,6 +73,12 @@ pnpm backend:dev
 
 # Start worker
 pnpm backend:worker
+
+# Start mobile + backend API only (no worker)
+pnpm dev:lite
+
+# Start mobile + backend API + worker together (same as pnpm dev)
+pnpm dev:full
 
 # Import events from JSON/CSV/NDJSON into Supabase
 pnpm backend:ingest -- ./events.csv --city Austin --source-name manual:atx:first-batch
