@@ -38,6 +38,8 @@ function buildLocalGuestFeed(
     fallbackStatus: 'none',
     remainingFreePreferenceActions,
     remainingFreeSwipes: remainingFreePreferenceActions,
+    inventoryStatus: 'ready',
+    warmupTriggered: false,
   };
 }
 
@@ -104,6 +106,7 @@ export default function HomeScreen() {
       auth.session?.user.id ?? (localGuestFallback ? 'local-guest' : 'no-session'),
       location.effectiveLocation?.latitude,
       location.effectiveLocation?.longitude,
+      location.effectiveLocation?.city,
       filters.date,
       filters.timeOfDay,
       filters.price,
@@ -116,12 +119,15 @@ export default function HomeScreen() {
       if (localGuestFallback) {
         return Promise.resolve(buildLocalGuestFeed(feedCursor, 20, remainingPreferenceActions));
       }
-      return aventiApi.getFeed({
-        latitude: location.effectiveLocation!.latitude,
-        longitude: location.effectiveLocation!.longitude,
-        limit: 20,
-        filters,
-        cursor: feedCursor ?? undefined,
+        return aventiApi.getFeed({
+          latitude: location.effectiveLocation!.latitude,
+          longitude: location.effectiveLocation!.longitude,
+          marketCity: location.effectiveLocation?.city ?? undefined,
+          marketState: location.effectiveLocation?.state ?? undefined,
+          marketCountry: location.effectiveLocation?.country ?? undefined,
+          limit: 20,
+          filters,
+          cursor: feedCursor ?? undefined,
       });
     },
     staleTime: localGuestFallback ? 0 : 15_000,
@@ -576,10 +582,14 @@ export default function HomeScreen() {
           <GlassPanel>
             <Text className="text-sm uppercase tracking-[2px] text-white/65">Feed Complete</Text>
             <Text className="mt-2 text-lg font-semibold text-white">
-              You reached the end of the current event stream.
+              {feedQuery.data?.inventoryStatus === 'warming'
+                ? `Warming your ${location.effectiveLocation?.city ?? 'local'} feed.`
+                : 'You reached the end of the current event stream.'}
             </Text>
             <Text className="mt-2 text-sm leading-5 text-white/70">
-              Aventi auto-loads more events as you scroll. You can also refresh to start from the top.
+              {feedQuery.data?.inventoryStatus === 'warming'
+                ? 'Aventi is fetching fresh events for this market in the background. Refresh in a moment to pull them in.'
+                : 'Aventi auto-loads more events as you scroll. You can also refresh to start from the top.'}
             </Text>
             <View className="mt-4 flex-row gap-3">
               {nextCursor ? (

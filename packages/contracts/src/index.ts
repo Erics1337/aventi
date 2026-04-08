@@ -46,7 +46,12 @@ export interface FeedRequest {
   filters: FeedFilters;
   latitude: number;
   longitude: number;
+  marketCity?: string;
+  marketState?: string | null;
+  marketCountry?: string | null;
 }
+
+export type FeedInventoryStatus = 'ready' | 'warming';
 
 export interface FeedResponse {
   items: EventCard[];
@@ -54,6 +59,9 @@ export interface FeedResponse {
   fallbackStatus?: 'none' | 'relaxed_filters' | 'insufficient_inventory';
   remainingFreeSwipes?: number;
   remainingFreePreferenceActions?: number;
+  marketKey?: string | null;
+  inventoryStatus: FeedInventoryStatus;
+  warmupTriggered: boolean;
 }
 
 export interface FavoritesResponse {
@@ -88,11 +96,15 @@ export interface ProfileLocationPayload {
   latitude: number;
   longitude: number;
   city?: string | null;
+  state?: string | null;
+  country?: string | null;
   timezone?: string | null;
 }
 
 export interface MeProfile {
   city?: string | null;
+  state?: string | null;
+  country?: string | null;
   timezone?: string | null;
   latitude?: number | null;
   longitude?: number | null;

@@ -22,6 +22,8 @@ export interface LocationPoint {
   latitude: number;
   longitude: number;
   city?: string | null;
+  state?: string | null;
+  country?: string | null;
   timezone?: string | null;
 }
 
@@ -56,6 +58,8 @@ export const TRAVEL_MODE_PRESETS: readonly TravelModeOverride[] = [
     id: 'nyc',
     label: 'New York City',
     city: 'New York',
+    state: 'NY',
+    country: 'US',
     timezone: 'America/New_York',
     latitude: 40.7128,
     longitude: -74.006,
@@ -64,6 +68,8 @@ export const TRAVEL_MODE_PRESETS: readonly TravelModeOverride[] = [
     id: 'miami',
     label: 'Miami',
     city: 'Miami',
+    state: 'FL',
+    country: 'US',
     timezone: 'America/New_York',
     latitude: 25.7617,
     longitude: -80.1918,
@@ -72,6 +78,8 @@ export const TRAVEL_MODE_PRESETS: readonly TravelModeOverride[] = [
     id: 'la',
     label: 'Los Angeles',
     city: 'Los Angeles',
+    state: 'CA',
+    country: 'US',
     timezone: 'America/Los_Angeles',
     latitude: 34.0522,
     longitude: -118.2437,
@@ -86,13 +94,23 @@ function resolveLocalTimezone(): string | null {
   }
 }
 
-async function reverseGeocodeCity(latitude: number, longitude: number): Promise<string | null> {
+interface GeocodeResult {
+  city: string | null;
+  state: string | null;
+  country: string | null;
+}
+
+async function reverseGeocodeLocation(latitude: number, longitude: number): Promise<GeocodeResult> {
   try {
     const results = await Location.reverseGeocodeAsync({ latitude, longitude });
     const first = results[0];
-    return first?.city ?? first?.district ?? first?.subregion ?? null;
+    return {
+      city: first?.city ?? first?.district ?? first?.subregion ?? null,
+      state: first?.region ?? null,
+      country: first?.isoCountryCode ?? first?.country ?? null,
+    };
   } catch {
-    return null;
+    return { city: null, state: null, country: null };
   }
 }
 
@@ -119,6 +137,8 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
       latitude: Number(location.latitude.toFixed(4)),
       longitude: Number(location.longitude.toFixed(4)),
       city: location.city ?? null,
+      state: location.state ?? null,
+      country: location.country ?? null,
       timezone: location.timezone ?? null,
     });
     if (signature === lastSyncedSignature.current) {
@@ -130,6 +150,8 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
         latitude: location.latitude,
         longitude: location.longitude,
         city: location.city ?? null,
+        state: location.state ?? null,
+        country: location.country ?? null,
         timezone: location.timezone ?? null,
       });
       lastSyncedSignature.current = signature;
@@ -147,11 +169,18 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
       });
       const latitude = position.coords.latitude;
       const longitude = position.coords.longitude;
-      const [city, timezone] = await Promise.all([
-        reverseGeocodeCity(latitude, longitude),
+      const [geocode, timezone] = await Promise.all([
+        reverseGeocodeLocation(latitude, longitude),
         Promise.resolve(resolveLocalTimezone()),
       ]);
-      const location: LocationPoint = { latitude, longitude, city, timezone };
+      const location: LocationPoint = {
+        latitude,
+        longitude,
+        city: geocode.city,
+        state: geocode.state,
+        country: geocode.country,
+        timezone,
+      };
 
       startTransition(() => {
         setDeviceLocation(location);
@@ -166,6 +195,8 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
           latitude: 30.2672,
           longitude: -97.7431,
           city: 'Austin',
+          state: 'TX',
+          country: 'US',
           timezone: 'America/Chicago',
         };
         startTransition(() => {
@@ -270,6 +301,8 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
             latitude: parsed.latitude,
             longitude: parsed.longitude,
             city: typeof parsed.city === 'string' ? parsed.city : null,
+            state: typeof parsed.state === 'string' ? parsed.state : null,
+            country: typeof parsed.country === 'string' ? parsed.country : null,
             timezone: typeof parsed.timezone === 'string' ? parsed.timezone : null,
           });
         }

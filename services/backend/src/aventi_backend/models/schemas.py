@@ -55,6 +55,9 @@ class FeedResponse(BaseModel):
     remaining_free_preference_actions: int | None = Field(
         default=None, alias="remainingFreePreferenceActions"
     )
+    market_key: str | None = Field(default=None, alias="marketKey")
+    inventory_status: Literal["ready", "warming"] = Field(alias="inventoryStatus")
+    warmup_triggered: bool = Field(default=False, alias="warmupTriggered")
 
 
 class SwipePayload(BaseModel):
@@ -84,6 +87,8 @@ class ProfileLocationPayload(BaseModel):
     latitude: float
     longitude: float
     city: str | None = None
+    state: str | None = None
+    country: str | None = None
     timezone: str | None = None
 
 
