@@ -6,7 +6,9 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "plugins": [
       "expo-router",
       [
@@ -24,7 +26,17 @@
       "bundleIdentifier": "com.aventi.app"
     },
     "android": {
-      "package": "com.aventi.app"
+      "package": "com.aventi.app",
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "0a7b66a7-c65c-4356-a5da-5eccde6e5000"
+      }
     }
   }
 }
