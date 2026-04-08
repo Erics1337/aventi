@@ -1,3 +1,12 @@
+"""
+CLI Script: manual_ingest
+Command: aventi-manual-ingest
+
+This script is used to manually import event payloads into the Aventi database from
+local files (JSON, NDJSON/JSONL, or CSV). It normalizes the file data mapping and
+optionally queues up background verification jobs to validate the imported events.
+"""
+
 from __future__ import annotations
 
 import argparse

@@ -17,38 +17,52 @@ async def worker_loop() -> None:
     worker_name = f"aventi-worker@{socket.gethostname()}"
 
     logger.info("worker.started", poll_seconds=settings.worker_poll_seconds, worker_name=worker_name)
-    while True:
-        try:
-            async with open_db_session() as session:
-                repo = JobQueueRepository(session)
-                jobs = await repo.claim_due_jobs(worker_name=worker_name, limit=5)
-                if not jobs:
-                    await asyncio.sleep(settings.worker_poll_seconds)
-                    continue
+    try:
+        while True:
+            try:
+                async with open_db_session() as session:
+                    repo = JobQueueRepository(session)
+                    jobs = await repo.claim_due_jobs(worker_name=worker_name, limit=5)
+                    if not jobs:
+                        await asyncio.sleep(settings.worker_poll_seconds)
+                        continue
 
-                for job in jobs:
-                    logger.info(
-                        "worker.job.claimed",
-                        job_id=job.id,
-                        job_type=job.type,
-                        attempts=job.attempts,
-                        max_attempts=job.max_attempts,
-                    )
-                    try:
-                        result = await process_job(job, session)
-                        await repo.mark_complete(job.id, run_id=job.run_id)
-                        logger.info("worker.job.completed", job_id=job.id, job_type=job.type, result=result)
-                    except Exception as exc:  # noqa: BLE001
-                        await repo.mark_failed(job.id, str(exc), run_id=job.run_id)
-                        logger.exception("worker.job.failed", job_id=job.id, job_type=job.type)
-        except RuntimeError as exc:
-            logger.error("worker.misconfigured", error=str(exc))
-            await asyncio.sleep(settings.worker_poll_seconds)
+                    for job in jobs:
+                        logger.info(
+                            "worker.job.claimed",
+                            job_id=job.id,
+                            job_type=job.type,
+                            attempts=job.attempts,
+                            max_attempts=job.max_attempts,
+                        )
+                        try:
+                            result = await process_job(job, session)
+                            await repo.mark_complete(job.id, run_id=job.run_id)
+                            logger.info(
+                                "worker.job.completed",
+                                job_id=job.id,
+                                job_type=job.type,
+                                result=result,
+                            )
+                        except (asyncio.CancelledError, KeyboardInterrupt):
+                            logger.info("worker.job.interrupted", job_id=job.id, job_type=job.type)
+                            raise
+                        except Exception as exc:  # noqa: BLE001
+                            await repo.mark_failed(job.id, str(exc), run_id=job.run_id)
+                            logger.exception("worker.job.failed", job_id=job.id, job_type=job.type)
+            except RuntimeError as exc:
+                logger.error("worker.misconfigured", error=str(exc))
+                await asyncio.sleep(settings.worker_poll_seconds)
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        logger.info("worker.stopped", worker_name=worker_name)
 
 
 def main() -> None:
     configure_logging(get_settings().log_level)
-    asyncio.run(worker_loop())
+    try:
+        asyncio.run(worker_loop())
+    except KeyboardInterrupt:
+        logger.info("worker.shutdown_complete")
 
 
 if __name__ == "__main__":

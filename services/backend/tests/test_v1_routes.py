@@ -26,12 +26,23 @@ def test_bootstrap_and_feed_flow() -> None:
     body = bootstrap.json()
     assert body['id'] == 'dev-user'
 
-    feed = client.get('/v1/feed', params={'latitude': 30.2672, 'longitude': -97.7431})
+    feed = client.get(
+        '/v1/feed',
+        params={
+            'latitude': 30.2672,
+            'longitude': -97.7431,
+            'marketCity': 'Austin',
+            'marketCountry': 'US',
+        },
+    )
     assert feed.status_code == 200
     payload = feed.json()
     assert len(payload['items']) >= 1
     assert payload['remainingFreeSwipes'] == 10
     assert payload['remainingFreePreferenceActions'] == 10
+    assert payload['marketKey'] == 'austin||us'
+    assert payload['inventoryStatus'] == 'ready'
+    assert payload['warmupTriggered'] is False
 
     location_update = client.put(
         '/v1/me/location',

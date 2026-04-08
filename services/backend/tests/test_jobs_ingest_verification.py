@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -46,15 +47,21 @@ async def pg_session_jobs() -> AsyncSession:
 async def test_job_queue_lifecycle_persists_claim_and_run_status(pg_session_jobs: AsyncSession) -> None:
     repo = JobQueueRepository(pg_session_jobs)
     test_id = str(uuid4())
+    stale_run_at = datetime.now(tz=UTC) - timedelta(days=30)
 
-    queued_ok = await repo.enqueue_job(JobType.CITY_SCAN, {"testRunId": test_id, "city": "Austin"})
+    queued_ok = await repo.enqueue_job(
+        JobType.CITY_SCAN,
+        {"testRunId": test_id, "city": "Austin"},
+        run_at=stale_run_at,
+    )
     queued_fail = await repo.enqueue_job(
         JobType.VERIFY_EVENT,
         {"testRunId": test_id, "eventId": '10000000-0000-0000-0000-000000000001'},
         max_attempts=1,
+        run_at=stale_run_at,
     )
 
-    claimed = await repo.claim_due_jobs(worker_name='pytest-worker', limit=20)
+    claimed = await repo.claim_due_jobs(worker_name='pytest-worker', limit=500)
     ours = [job for job in claimed if job.payload.get('testRunId') == test_id]
     assert len(ours) == 2
     for job in ours:
@@ -100,13 +107,19 @@ async def test_job_queue_lifecycle_persists_claim_and_run_status(pg_session_jobs
 
 
 class AlwaysInactiveVerifier:
-    async def verify_booking_url(self, url: str) -> bool:
+    async def verify_booking_url(self, url: str) -> bool | None:
         _ = url
         return False
 
 
+class IndeterminateVerifier:
+    async def verify_booking_url(self, url: str) -> bool | None:
+        _ = url
+        return None
+
+
 @pytest.mark.asyncio
-async def test_manual_ingest_is_idempotent_and_verification_hides_inactive_event(
+async def test_manual_ingest_is_idempotent_and_verification_soft_gates_inactive_event(
     pg_session_jobs: AsyncSession,
 ) -> None:
     ingest = ManualIngestService(pg_session_jobs)
@@ -171,26 +184,136 @@ async def test_manual_ingest_is_idempotent_and_verification_hides_inactive_event
     assert int(vibe_tag_count or 0) >= 2
 
     verification = VerificationService(pg_session_jobs, verifier=AlwaysInactiveVerifier())
-    verify_result = await verification.verify_event(event_id)
-    assert verify_result['active'] is False
-    assert verify_result['status'] == 'inactive'
+    first_verify = await verification.verify_event(event_id)
+    assert first_verify['active'] is False
+    assert first_verify['status'] == 'suspect'
 
-    hidden_flag = await pg_session_jobs.scalar(
-        text('select hidden from public.events where id = :event_id'),
+    first_state = await pg_session_jobs.execute(
+        text(
+            """
+            select hidden, verification_status, verification_fail_count
+            from public.events
+            where id = :event_id
+            """
+        ),
         {'event_id': event_id},
     )
+    first_row = first_state.mappings().one()
+    assert bool(first_row['hidden']) is False
+    assert first_row['verification_status'] == 'suspect'
+    assert int(first_row['verification_fail_count']) == 1
+
+    second_verify = await verification.verify_event(event_id)
+    assert second_verify['active'] is False
+    assert second_verify['status'] == 'inactive'
+
+    second_state = await pg_session_jobs.execute(
+        text(
+            """
+            select hidden, verification_status, verification_fail_count
+            from public.events
+            where id = :event_id
+            """
+        ),
+        {'event_id': event_id},
+    )
+    second_row = second_state.mappings().one()
+    assert bool(second_row['hidden']) is False
+    assert second_row['verification_status'] == 'inactive'
+    assert int(second_row['verification_fail_count']) == 2
+
     verification_runs = await pg_session_jobs.scalar(
         text('select count(*) from public.verification_runs where event_id = :event_id and active = false'),
         {'event_id': event_id},
     )
-    assert bool(hidden_flag) is True
     assert int(verification_runs or 0) >= 1
 
 
 @pytest.mark.asyncio
-async def test_worker_city_scan_json_adapter_enqueues_and_processes_verification(
+async def test_indeterminate_verification_does_not_downgrade_event(
     pg_session_jobs: AsyncSession,
 ) -> None:
+    ingest = ManualIngestService(pg_session_jobs)
+    unique = str(uuid4())
+    booking_url = f'https://example.com/indeterminate-verification/{unique}'
+    starts_at = (datetime.now(tz=UTC) + timedelta(days=1)).isoformat()
+
+    summary = await ingest.ingest_manual(
+        source_name=f'pytest-indeterminate-{unique[:8]}',
+        city='Austin',
+        events=[
+            {
+                'title': f'Indeterminate Event {unique[:8]}',
+                'description': 'Verification should not downgrade on parser failure.',
+                'category': 'experiences',
+                'bookingUrl': booking_url,
+                'startsAt': starts_at,
+                'venue': {
+                    'name': f'Indeterminate Venue {unique[:8]}',
+                    'city': 'Austin',
+                    'state': 'TX',
+                    'latitude': 30.2672,
+                    'longitude': -97.7431,
+                },
+                'vibes': ['social'],
+                'tags': ['indeterminate-test'],
+            }
+        ],
+    )
+    event_id = summary.event_ids[0]
+
+    verification = VerificationService(pg_session_jobs, verifier=IndeterminateVerifier())
+    verify_result = await verification.verify_event(event_id)
+
+    assert verify_result['eventId'] == event_id
+    assert verify_result['active'] is None
+    assert verify_result['status'] == 'pending'
+    assert verify_result['skipped'] is True
+
+    event_state = await pg_session_jobs.execute(
+        text(
+            """
+            select verification_status, verification_fail_count, last_verified_at, last_verified_active
+            from public.events
+            where id = :event_id
+            """
+        ),
+        {'event_id': event_id},
+    )
+    state_row = event_state.mappings().one()
+    assert state_row['verification_status'] == 'pending'
+    assert int(state_row['verification_fail_count']) == 0
+    assert state_row['last_verified_at'] is not None
+    assert state_row['last_verified_active'] is None
+
+    verification_run = await pg_session_jobs.execute(
+        text(
+            """
+            select status, active
+            from public.verification_runs
+            where event_id = :event_id
+            order by verified_at desc
+            limit 1
+            """
+        ),
+        {'event_id': event_id},
+    )
+    run_row = verification_run.mappings().one()
+    assert run_row['status'] == 'indeterminate'
+    assert run_row['active'] is None
+
+
+from unittest.mock import patch
+
+@patch('aventi_backend.services.verification.get_settings')
+@pytest.mark.asyncio
+async def test_worker_city_scan_json_adapter_enqueues_and_processes_verification(
+    mock_get_settings,
+    pg_session_jobs: AsyncSession,
+) -> None:
+    class MockSettings:
+        google_api_key = None
+    mock_get_settings.return_value = MockSettings()
     repo = JobQueueRepository(pg_session_jobs)
     unique = str(uuid4())
     booking_url = f'http://example.com/city-scan-test/{unique}'
@@ -269,15 +392,116 @@ async def test_worker_city_scan_json_adapter_enqueues_and_processes_verification
     assert verify_result['eventId'] == event_id
     # MockVerifier marks non-https booking URLs inactive.
     assert verify_result['active'] is False
-    assert verify_result['status'] == 'inactive'
+    assert verify_result['status'] == 'suspect'
 
-    hidden_flag = await pg_session_jobs.scalar(
-        text('select hidden from public.events where id = :event_id'),
+    event_state = await pg_session_jobs.execute(
+        text(
+            """
+            select hidden, verification_status, verification_fail_count
+            from public.events
+            where id = :event_id
+            """
+        ),
         {'event_id': event_id},
     )
+    state_row = event_state.mappings().one()
     verify_count = await pg_session_jobs.scalar(
         text('select count(*) from public.verification_runs where event_id = :event_id'),
         {'event_id': event_id},
     )
-    assert bool(hidden_flag) is True
+    assert bool(state_row['hidden']) is False
+    assert state_row['verification_status'] == 'suspect'
+    assert int(state_row['verification_fail_count']) == 1
     assert int(verify_count or 0) >= 1
+
+
+@pytest.mark.asyncio
+async def test_market_warmup_runs_structured_sources_before_gemini(
+    pg_session_jobs: AsyncSession,
+) -> None:
+    repo = JobQueueRepository(pg_session_jobs)
+    unique = str(uuid4())
+    market_city = f'Pytest Warm Market {unique[:8]}'
+    market_key = f'{market_city.lower()}||us'
+    source_name = f'pytest-market-json-{unique[:8]}'
+    events = []
+    for index in range(20):
+        events.append(
+            {
+                'title': f'Market Warmup Event {unique[:8]} {index}',
+                'bookingUrl': f'https://example.com/market-warmup/{unique}/{index}',
+                'startsAt': (datetime.now(tz=UTC) + timedelta(days=1, hours=index)).isoformat(),
+                'category': 'concerts',
+                'vibes': ['social'],
+                'tags': ['structured-source', unique[:8]],
+                'venue': {
+                    'name': f'Market Venue {unique[:8]} {index}',
+                    'city': market_city,
+                    'state': '',
+                    'latitude': 37.7749,
+                    'longitude': -122.4194,
+                },
+            }
+        )
+
+    source_row = await pg_session_jobs.execute(
+        text(
+            """
+            insert into public.ingest_sources (name, source_type, enabled, config, created_at, updated_at)
+            values (:name, 'json', true, cast(:config_json as jsonb), now(), now())
+            returning id::text as id
+            """
+        ),
+        {'name': source_name, 'config_json': json.dumps({'sourceData': {'events': events}})},
+    )
+    source_id = source_row.mappings().one()['id']
+    await pg_session_jobs.execute(
+        text(
+            """
+            insert into public.market_ingest_sources (market_key, source_id, priority, enabled)
+            values (:market_key, :source_id, 10, true)
+            on conflict (market_key, source_id) do update
+            set priority = excluded.priority,
+                enabled = excluded.enabled,
+                updated_at = now()
+            """
+        ),
+        {'market_key': market_key, 'source_id': source_id},
+    )
+    await pg_session_jobs.commit()
+
+    warmup_job = await repo.enqueue_job(
+        JobType.MARKET_WARMUP,
+        {
+            'marketKey': market_key,
+            'marketCity': market_city,
+            'marketCountry': 'US',
+            'centerLatitude': 37.7749,
+            'centerLongitude': -122.4194,
+        },
+    )
+
+    claimed_jobs = await repo.claim_due_jobs(worker_name='pytest-market-warmup', limit=10)
+    claimed_job = next(job for job in claimed_jobs if job.id == warmup_job.id)
+    result = await process_job(claimed_job, pg_session_jobs)
+    await repo.mark_complete(claimed_job.id, run_id=claimed_job.run_id)
+
+    assert result is not None
+    assert result['marketKey'] == market_key
+    assert result['structuredSourcesRun'] == 1
+    assert result['geminiJobsEnqueued'] == 0
+    assert int(result['visibleEventCount7d']) >= 20
+
+    gemini_jobs = await pg_session_jobs.scalar(
+        text(
+            """
+            select count(*)
+            from public.job_queue
+            where job_type = 'CITY_SCAN'
+              and payload ->> 'marketKey' = :market_key
+              and payload ->> 'sourceName' = 'gemini'
+            """
+        ),
+        {'market_key': market_key},
+    )
+    assert int(gemini_jobs or 0) == 0
