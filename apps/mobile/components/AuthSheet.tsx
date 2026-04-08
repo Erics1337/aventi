@@ -104,7 +104,7 @@ function AuthButton({
     variant === 'primary'
       ? 'rounded-2xl border border-white/20 bg-white px-4 py-3'
       : variant === 'secondary'
-        ? 'rounded-2xl border border-white/15 bg-white/8 px-4 py-3'
+        ? 'rounded-2xl border border-white/20 bg-white/10 px-4 py-3'
         : 'rounded-2xl border border-white/10 bg-transparent px-4 py-3';
 
   const textClassName =
@@ -193,14 +193,14 @@ export function AuthSheet() {
           <View className="gap-4">
             <View className="flex-row items-start justify-between gap-4">
               <View className="flex-1">
-                <Text className="text-[11px] uppercase tracking-[2px] text-white/55">{copy.eyebrow}</Text>
+                <Text className="text-[11px] uppercase tracking-[2px] text-white/50">{copy.eyebrow}</Text>
                 <Text className="mt-2 text-2xl font-bold uppercase tracking-[1px] text-white">{copy.title}</Text>
-                <Text className="mt-2 text-sm leading-5 text-white/72">{copy.subtitle}</Text>
+                <Text className="mt-2 text-sm leading-5 text-white/70">{copy.subtitle}</Text>
               </View>
               {canCloseWithoutGuest ? (
                 <Pressable
                   onPress={auth.closeAuthPrompt}
-                  className="rounded-full border border-white/12 bg-white/5 px-3 py-2 active:scale-95"
+                  className="rounded-full border border-white/10 bg-white/5 px-3 py-2 active:scale-95"
                 >
                   <Text className="text-[11px] font-semibold uppercase tracking-[1.2px] text-white/80">Later</Text>
                 </Pressable>
@@ -218,7 +218,7 @@ export function AuthSheet() {
                   setErrorText(null);
                   setNoticeText(null);
                 }}
-                className={`flex-1 rounded-xl border px-3 py-2 ${formMode === 'signin' ? 'border-white/20 bg-white/12' : 'border-white/10 bg-white/4'} active:scale-[0.99]`}
+                className={`flex-1 rounded-xl border px-3 py-2 ${formMode === 'signin' ? 'border-white/20 bg-white/10' : 'border-white/10 bg-white/5'} active:scale-[0.99]`}
               >
                 <Text className="text-center text-xs font-semibold uppercase tracking-[1.2px] text-white">
                   Sign In
@@ -230,7 +230,7 @@ export function AuthSheet() {
                   setErrorText(null);
                   setNoticeText(null);
                 }}
-                className={`flex-1 rounded-xl border px-3 py-2 ${formMode === 'signup' ? 'border-white/20 bg-white/12' : 'border-white/10 bg-white/4'} active:scale-[0.99]`}
+                className={`flex-1 rounded-xl border px-3 py-2 ${formMode === 'signup' ? 'border-white/20 bg-white/10' : 'border-white/10 bg-white/5'} active:scale-[0.99]`}
               >
                 <Text className="text-center text-xs font-semibold uppercase tracking-[1.2px] text-white">
                   {auth.isAnonymousUser ? 'Upgrade Guest' : 'Create Account'}
@@ -247,7 +247,7 @@ export function AuthSheet() {
                 keyboardType="email-address"
                 placeholder="Email"
                 placeholderTextColor="rgba(255,255,255,0.4)"
-                className="rounded-xl border border-white/12 bg-white/6 px-4 py-3 text-white"
+                className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white"
               />
               <TextInput
                 value={password}
@@ -257,7 +257,7 @@ export function AuthSheet() {
                 autoComplete={formMode === 'signin' ? 'current-password' : 'new-password'}
                 placeholder={formMode === 'signin' ? 'Password' : 'Password (min 6+)'}
                 placeholderTextColor="rgba(255,255,255,0.4)"
-                className="rounded-xl border border-white/12 bg-white/6 px-4 py-3 text-white"
+                className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white"
               />
               {auth.isAnonymousUser ? (
                 <Text className="text-xs leading-5 text-white/60">
@@ -270,7 +270,7 @@ export function AuthSheet() {
                 </Text>
               ) : null}
               {auth.isSupabaseConfigured && !captchaSiteKey ? (
-                <Text className="text-xs leading-5 text-white/55">
+                <Text className="text-xs leading-5 text-white/50">
                   If you enable Supabase Auth CAPTCHA (recommended for anonymous sign-ins), add `EXPO_PUBLIC_HCAPTCHA_SITE_KEY` and a mobile hCaptcha challenge so auth requests can send `captchaToken`.
                 </Text>
               ) : null}

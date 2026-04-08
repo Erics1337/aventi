@@ -3,7 +3,9 @@
   "private": true,
   "packageManager": "pnpm@10.13.1",
   "scripts": {
-    "dev": "dotenv -c -- turbo run dev --parallel",
+    "dev": "dotenv -c -- turbo run dev worker --parallel",
+    "dev:lite": "dotenv -c -- turbo run dev --parallel",
+    "dev:full": "dotenv -c -- turbo run dev worker --parallel",
     "build": "turbo run build",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",

@@ -143,17 +143,17 @@ export default function ProfileScreen() {
           <View className="mt-4 flex-row gap-2">
             <Pressable
               onPress={handlePremiumPurchase}
-              className="flex-1 rounded-2xl border border-white/12 bg-white/8 px-4 py-3 active:scale-[0.99]"
+              className="flex-1 rounded-2xl border border-white/20 bg-white/10 px-4 py-3 active:scale-[0.99]"
             >
-              <Text className="text-center text-[11px] font-semibold uppercase tracking-[1.2px] text-white/92">
+              <Text className="text-center text-[11px] font-semibold uppercase tracking-[1.2px] text-white">
                 Premium Upgrade
               </Text>
             </Pressable>
             <Pressable
               onPress={handlePremiumRestore}
-              className="flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 active:scale-[0.99]"
+              className="flex-1 rounded-2xl border border-white/15 bg-white/5 px-4 py-3 active:scale-[0.99]"
             >
-              <Text className="text-center text-[11px] font-semibold uppercase tracking-[1.2px] text-white/82">
+              <Text className="text-center text-[11px] font-semibold uppercase tracking-[1.2px] text-white/90">
                 Restore Premium
               </Text>
             </Pressable>
