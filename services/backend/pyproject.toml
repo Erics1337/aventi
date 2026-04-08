@@ -18,7 +18,8 @@ dependencies = [
   "asyncpg>=0.30.0,<1.0.0",
   "python-jose[cryptography]>=3.3.0,<4.0.0",
   "httpx>=0.28.0,<1.0.0",
-  "structlog>=24.4.0,<25.0.0"
+  "structlog>=24.4.0,<25.0.0",
+  "google-genai>=1.66.0",
 ]
 
 [project.optional-dependencies]
@@ -32,6 +33,7 @@ dev = [
 
 [project.scripts]
 aventi-manual-ingest = "aventi_backend.cli.manual_ingest:main"
+aventi-enqueue-market-warmups = "aventi_backend.cli.enqueue_market_warmups:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "services/backend/src"]
