@@ -39,4 +39,7 @@ def get_seed_feed(settings: Settings) -> FeedResponse:
         fallbackStatus="none",
         remainingFreeSwipes=settings.free_swipe_limit or FREE_SWIPE_LIMIT_PER_DAY,
         remainingFreePreferenceActions=settings.free_swipe_limit or FREE_SWIPE_LIMIT_PER_DAY,
+        marketKey=None,
+        inventoryStatus="ready",
+        warmupTriggered=False,
     )

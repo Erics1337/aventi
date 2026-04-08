@@ -18,6 +18,11 @@ from aventi_backend.models.schemas import (
     UserPreferences,
 )
 from aventi_backend.services.feed import get_seed_feed
+from aventi_backend.services.market_inventory import (
+    ELIGIBLE_VERIFICATION_STATUSES,
+    MarketWarmupService,
+    build_market_descriptor,
+)
 from aventi_backend.services.personalization import apply_vibe_update
 
 _SUPPORTED_VIBE_TAGS = {
@@ -49,17 +54,16 @@ def _time_of_day_matches(starts_at: datetime, bucket: str | None) -> bool:
     if not bucket:
         return True
     hour = starts_at.astimezone(timezone.utc).hour
-    match bucket:
-        case "morning":
-            return 5 <= hour < 12
-        case "afternoon":
-            return 12 <= hour < 17
-        case "evening":
-            return 17 <= hour < 22
-        case "night":
-            return hour >= 22 or hour < 5
-        case _:
-            return True
+    if bucket == "morning":
+        return 5 <= hour < 12
+    elif bucket == "afternoon":
+        return 12 <= hour < 17
+    elif bucket == "evening":
+        return 17 <= hour < 22
+    elif bucket == "night":
+        return hour >= 22 or hour < 5
+    else:
+        return True
 
 
 def _date_window(date_filter: str, now: datetime) -> tuple[datetime, datetime]:
@@ -157,6 +161,9 @@ class AventiRepository:
         price: str | None,
         radius_miles: float | None,
         cursor: str | None,
+        market_city: str | None,
+        market_state: str | None,
+        market_country: str | None,
     ) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -303,8 +310,11 @@ class InMemoryAventiRepository(AventiRepository):
         price: str | None,
         radius_miles: float | None,
         cursor: str | None,
+        market_city: str | None,
+        market_state: str | None,
+        market_country: str | None,
     ) -> dict[str, Any]:
-        _ = (user_id, date, latitude, longitude, time_of_day, price, radius_miles)
+        _ = (user_id, date, latitude, longitude, time_of_day, price, radius_miles, market_state)
         response = get_seed_feed(settings).model_dump(by_alias=True)
         items = [item for item in response["items"] if item["id"] not in self.state.hidden_events]
         offset = _decode_offset_cursor(cursor)
@@ -316,8 +326,17 @@ class InMemoryAventiRepository(AventiRepository):
         remaining = self._remaining_free_swipes(user_id, settings, now)
         response["remainingFreeSwipes"] = remaining
         response["remainingFreePreferenceActions"] = remaining
+        response["inventoryStatus"] = "ready"
+        response["warmupTriggered"] = False
+        response["marketKey"] = (
+            f"{market_city.strip().lower()}|{(market_state or '').strip().lower()}|{(market_country or 'US').strip().lower()}"
+            if market_city and market_city.strip()
+            else None
+        )
         if not response["items"]:
             response["fallbackStatus"] = "insufficient_inventory"
+            if response["marketKey"]:
+                response["inventoryStatus"] = "warming"
         return response
 
     def _remaining_free_swipes(self, user_id: str, settings: Settings, now: datetime) -> int:
@@ -615,6 +634,9 @@ class PostgresAventiRepository(AventiRepository):
         price: str | None,
         radius_miles: float | None,
         cursor: str | None,
+        market_city: str | None,
+        market_state: str | None,
+        market_country: str | None,
     ) -> dict[str, Any]:
         offset = _decode_offset_cursor(cursor)
         now = datetime.now(tz=timezone.utc)
@@ -626,21 +648,8 @@ class PostgresAventiRepository(AventiRepository):
             "start_ts": start_ts,
             "end_ts": end_ts,
             "limit_rows": max((offset + limit) * 4, 20),
+            "eligible_statuses": list(ELIGIBLE_VERIFICATION_STATUSES),
         }
-        verification_clause = ""
-        if settings.feed_verification_max_age_hours > 0:
-            verification_cutoff = now - timedelta(hours=settings.feed_verification_max_age_hours)
-            unverified_grace_cutoff = now - timedelta(
-                hours=max(0, settings.feed_unverified_grace_hours)
-            )
-            query_params["verification_cutoff_ts"] = verification_cutoff
-            query_params["unverified_grace_cutoff_ts"] = unverified_grace_cutoff
-            verification_clause = """
-                  and (
-                    (lv.event_id is not null and lv.active = true and lv.verified_at >= :verification_cutoff_ts)
-                    or (lv.event_id is null and e.created_at >= :unverified_grace_cutoff_ts)
-                  )
-            """
         if price in {"free", "paid"}:
             price_clause = "and e.is_free = :is_free"
             query_params["is_free"] = price == "free"
@@ -692,13 +701,6 @@ class PostgresAventiRepository(AventiRepository):
                     and eo.starts_at >= :start_ts
                     and eo.starts_at < :end_ts
                   order by eo.event_id, eo.starts_at asc
-                ), latest_verification as (
-                  select distinct on (vr.event_id)
-                    vr.event_id,
-                    vr.verified_at,
-                    vr.active
-                  from public.verification_runs vr
-                  order by vr.event_id, vr.verified_at desc
                 )
                 select
                   e.id::text as id,
@@ -714,19 +716,19 @@ class PostgresAventiRepository(AventiRepository):
                   e.image_url,
                   e.price_label,
                   e.is_free,
+                  e.verification_status,
                   v.latitude,
                   v.longitude
                 from public.events e
                 join next_occurrence no on no.event_id = e.id
                 left join public.venues v on v.id = e.venue_id
-                left join latest_verification lv on lv.event_id = e.id
                 where e.hidden = false
+                  and e.verification_status = any(:eligible_statuses)
                   {price_clause}
-                  {verification_clause}
                 order by no.starts_at asc, e.created_at desc
                 limit :limit_rows
                 """
-                .format(price_clause=price_clause, verification_clause=verification_clause)
+                .format(price_clause=price_clause)
             ),
             query_params,
         )
@@ -802,31 +804,31 @@ class PostgresAventiRepository(AventiRepository):
         )
 
         remaining = await self._remaining_free_swipes(user_id, settings, now)
-
-        # Fallback to seed data only when the events table is actually empty (early development).
-        if not items and offset == 0 and not recent_passed_event_ids:
-            total_events = await self.session.scalar(text("select count(*) from public.events"))
-            if int(total_events or 0) == 0:
-                seed_repo = InMemoryAventiRepository(_MemoryState())
-                return await seed_repo.get_feed(
-                    user_id=user_id,
-                    settings=settings,
-                    date=date,
-                    latitude=latitude,
-                    longitude=longitude,
-                    limit=limit,
-                    time_of_day=None,  # Don't filter seed data by time
-                    price=price,
-                    radius_miles=None,  # Don't filter seed data by radius
-                    cursor=cursor,
-                )
+        fallback_status = "none" if items else "insufficient_inventory"
+        market_descriptor = build_market_descriptor(
+            city=market_city,
+            state=market_state,
+            country=market_country,
+            center_latitude=latitude,
+            center_longitude=longitude,
+        )
+        market_key: str | None = None
+        inventory_status = "ready"
+        warmup_triggered = False
+        if market_descriptor is not None:
+            market_key, inventory_status, warmup_triggered = await MarketWarmupService(
+                self.session
+            ).request_warmup(market_descriptor)
 
         return {
             "items": items,
             "nextCursor": next_cursor,
-            "fallbackStatus": "none" if items else "insufficient_inventory",
+            "fallbackStatus": fallback_status,
             "remainingFreeSwipes": remaining,
             "remainingFreePreferenceActions": remaining,
+            "marketKey": market_key,
+            "inventoryStatus": inventory_status,
+            "warmupTriggered": warmup_triggered,
         }
 
     async def record_swipe(

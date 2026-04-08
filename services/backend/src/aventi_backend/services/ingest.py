@@ -258,6 +258,10 @@ class ManualIngestService:
                     crowd_age,
                     music_genre,
                     hidden,
+                    verification_status,
+                    verification_fail_count,
+                    last_verified_at,
+                    last_verified_active,
                     metadata,
                     created_at,
                     updated_at
@@ -276,6 +280,10 @@ class ManualIngestService:
                     :crowd_age,
                     :music_genre,
                     false,
+                    'pending',
+                    0,
+                    null,
+                    null,
                     cast(:metadata_json as jsonb),
                     now(),
                     now()
@@ -398,7 +406,7 @@ class ManualIngestService:
         return {
             "title": str(title),
             "description": self._pick(raw, "description", default=None),
-            "category": self._pick(raw, "category", default="experiences"),
+            "category": self._normalize_category(self._pick(raw, "category", default="experiences")),
             "bookingUrl": str(booking_url),
             "imageUrl": self._pick(raw, "imageUrl", "image_url", default=None),
             "priceLabel": self._pick(raw, "priceLabel", "price_label", default=None),
@@ -473,3 +481,20 @@ class ManualIngestService:
     def _booking_domain(url: str) -> str | None:
         match = re.match(r"https?://([^/]+)", url)
         return match.group(1).lower() if match else None
+
+    @staticmethod
+    def _normalize_category(value: Any) -> str:
+        if value is None:
+            return "experiences"
+        normalized = str(value).strip().lower()
+        if normalized in {"nightlife", "dining", "concerts", "wellness", "experiences"}:
+            return normalized
+        if "music" in normalized or "concert" in normalized or "show" in normalized:
+            return "concerts"
+        if "food" in normalized or "drink" in normalized or "dining" in normalized:
+            return "dining"
+        if "well" in normalized or "fitness" in normalized or "yoga" in normalized:
+            return "wellness"
+        if "night" in normalized or "club" in normalized or "bar" in normalized:
+            return "nightlife"
+        return "experiences"

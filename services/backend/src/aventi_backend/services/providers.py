@@ -37,7 +37,7 @@ class SearchGroundedScraper(Protocol):
 
 
 class VerificationProvider(Protocol):
-    async def verify_booking_url(self, url: str) -> bool: ...
+    async def verify_booking_url(self, url: str) -> bool | None: ...
 
 
 class ImageGenerationProvider(Protocol):
@@ -172,11 +172,14 @@ def build_city_scan_scraper(payload: dict[str, Any]) -> SearchGroundedScraper:
             rss_xml=str(source_data) if isinstance(source_data, str) else None,
             source_name=source_name,
         )
+    if source_type in {"gemini", "ai"}:
+        from aventi_backend.services.gemini import GeminiEventScraper
+        return GeminiEventScraper(source_name=source_name)
     return MockScraper()
 
 
 class MockVerifier:
-    async def verify_booking_url(self, url: str) -> bool:
+    async def verify_booking_url(self, url: str) -> bool | None:
         return url.startswith("https://")
 
 
@@ -352,4 +355,3 @@ def _xml_text(node: ElementTree.Element, name: str) -> str | None:
         return None
     text = child.text.strip()
     return text or None
-

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class JobType(StrEnum):
+    MARKET_WARMUP = "MARKET_WARMUP"
     CITY_SCAN = "CITY_SCAN"
     VERIFY_EVENT = "VERIFY_EVENT"
     ENRICH_EVENT = "ENRICH_EVENT"

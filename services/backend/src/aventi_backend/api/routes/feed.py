@@ -15,6 +15,9 @@ async def get_feed(
     latitude: float = Query(...),
     longitude: float = Query(...),
     limit: int = Query(default=20, ge=1, le=50),
+    marketCity: str | None = Query(default=None),
+    marketState: str | None = Query(default=None),
+    marketCountry: str | None = Query(default=None),
     timeOfDay: str | None = Query(default=None),
     price: str | None = Query(default=None),
     radiusMiles: float | None = Query(default=None),
@@ -34,6 +37,9 @@ async def get_feed(
         price=price,
         radius_miles=radiusMiles,
         cursor=cursor,
+        market_city=marketCity,
+        market_state=marketState,
+        market_country=marketCountry,
     )
     return FeedResponse.model_validate(payload)
 

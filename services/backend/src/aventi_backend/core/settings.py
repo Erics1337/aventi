@@ -29,6 +29,7 @@ class Settings(BaseSettings):
         default=48, alias="AVENTI_FEED_UNVERIFIED_GRACE_HOURS"
     )
     auth_dev_bypass: bool = Field(default=True, alias="AVENTI_AUTH_DEV_BYPASS")
+    google_api_key: str | None = Field(default=None, alias="GOOGLE_API_KEY")
     cors_origins: list[str] = ["*"]
     worker_poll_seconds: float = 2.0
 
