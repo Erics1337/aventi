@@ -84,7 +84,20 @@ export class AventiApiClient {
       ...(payload.filters.radiusMiles ? { radiusMiles: String(payload.filters.radiusMiles) } : {}),
       ...(payload.cursor ? { cursor: payload.cursor } : {}),
     });
+    for (const vibe of payload.filters.vibes ?? []) {
+      search.append('vibes', vibe);
+    }
+    for (const category of payload.filters.categories ?? []) {
+      search.append('categories', category);
+    }
     return this.request<FeedResponse>(`/v1/feed?${search.toString()}`);
+  }
+
+  refreshFeed(payload: FeedRequest) {
+    return this.request<FeedResponse>(`/v1/feed/refresh`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 
   postSwipe(payload: SwipePayload) {
@@ -110,6 +123,28 @@ export class AventiApiClient {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
+  }
+
+  resetSeenEvents() {
+    return this.request<{ ok: true; deleted: number }>(`/v1/me/seen-events/reset`, {
+      method: 'POST',
+    });
+  }
+
+  markMarketSeen(payload: {
+    city: string;
+    state?: string | null;
+    country?: string | null;
+    latitude?: number | null;
+    longitude?: number | null;
+  }) {
+    return this.request<{ ok: true; marketKey: string; bootstrapped: boolean }>(
+      `/v1/me/market-seen`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+    );
   }
 
   getEntitlements() {

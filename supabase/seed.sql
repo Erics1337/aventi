@@ -1,1 +1,1 @@
-\i ./seed/seed.sql
+-- No seed data - events discovered dynamically via SerpAPI based on user GPS location

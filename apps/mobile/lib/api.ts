@@ -1,17 +1,11 @@
 import { AventiApiClient } from '@aventi/api-client';
-import { supabase } from './supabase';
+import { getSupabaseAccessTokenWithRecovery } from './auth-session';
+import { resolveLocalhostUrl } from './localhost';
 
-const defaultBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'http://127.0.0.1:8000';
+const defaultBaseUrl =
+  resolveLocalhostUrl(process.env.EXPO_PUBLIC_API_BASE_URL) ?? 'http://127.0.0.1:8000';
 
 export const aventiApi = new AventiApiClient({
   baseUrl: defaultBaseUrl,
-  getAccessToken: async () => {
-    if (!supabase) {
-      return null;
-    }
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    return session?.access_token ?? null;
-  },
+  getAccessToken: getSupabaseAccessTokenWithRecovery,
 });

@@ -1,8 +1,12 @@
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from aventi_backend.core.auth import require_internal_api_key
+from aventi_backend.core.settings import get_settings
 from aventi_backend.db.session import get_db_session
 from aventi_backend.services.ingest import ManualIngestService
 from aventi_backend.services.jobs import JobType
@@ -64,7 +68,8 @@ async def ingest_manual(
             events=payload.events,
         )
         verification_jobs_enqueued = 0
-        if payload.enqueue_verification_jobs and ingest_summary.event_ids:
+        settings = get_settings()
+        if settings.enable_verification and payload.enqueue_verification_jobs and ingest_summary.event_ids:
             verification_jobs_enqueued = await VerificationService(session).enqueue_verification_jobs(
                 limit=len(ingest_summary.event_ids),
                 event_ids=ingest_summary.event_ids,
@@ -77,6 +82,29 @@ async def ingest_manual(
     response = ingest_summary.as_dict()
     response["verificationJobsEnqueued"] = verification_jobs_enqueued
     return response
+
+
+@router.post("/seen-events/reset")
+async def reset_seen_events(
+    payload: dict[str, Any] | None = None,
+    session: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Reset seen events for testing. Optional user_id in payload to reset specific user."""
+    try:
+        user_id = payload.get("user_id") if payload else None
+        if user_id:
+            result = await session.execute(
+                text("delete from public.feed_impressions where user_id = :user_id"),
+                {"user_id": user_id}
+            )
+            await session.commit()
+            return {"message": f"Reset seen events for user {user_id}", "deleted": result.rowcount}
+        else:
+            result = await session.execute(text("delete from public.feed_impressions"))
+            await session.commit()
+            return {"message": "Reset all seen events", "deleted": result.rowcount}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
 
 @router.post("/verification/run")

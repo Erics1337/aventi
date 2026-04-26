@@ -25,7 +25,7 @@ function formatDateTime(iso: string): string {
 
 function DetailRow({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
   return (
-    <View className="flex-row items-start gap-3 py-2">
+    <View className="flex-row gap-3 items-start py-2">
       <View className="mt-0.5 h-8 w-8 items-center justify-center rounded-full bg-white/8">
         <Ionicons name={icon} size={16} color="rgba(255,255,255,0.7)" />
       </View>
@@ -37,12 +37,34 @@ function DetailRow({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
   );
 }
 
+function formatVenueRating(rating: number | null | undefined, reviewCount: number | null | undefined): string | null {
+  if (rating === null || rating === undefined) return null;
+  const clamped = Math.min(Math.max(rating, 0), 5);
+  const rounded = Math.round(clamped);
+  const stars = '★'.repeat(rounded) + '☆'.repeat(5 - rounded);
+  return reviewCount ? `${clamped.toFixed(1)} ${stars} (${reviewCount.toLocaleString()} reviews)` : `${clamped.toFixed(1)} ${stars}`;
+}
+
+function formatPrice(event: EventCard): string {
+  if (event.isFree) return 'Free';
+  if (event.priceLabel) return event.priceLabel;
+  if (event.ticketOffers && event.ticketOffers.length > 0) {
+    const firstOffer = event.ticketOffers[0];
+    if (firstOffer.isFree) return 'Free';
+    if (firstOffer.priceLabel) return firstOffer.priceLabel;
+    if (firstOffer.provider) return `Tickets via ${firstOffer.provider}`;
+  }
+  return 'Check venue';
+}
+
 export function EventDetailModal({ event, visible, onClose }: Props) {
   if (!event) return null;
 
   const gradient = categoryGradients[event.category] ?? categoryGradients.experiences;
   const startsFormatted = formatDateTime(event.startsAt);
   const endsFormatted = event.endsAt ? formatDateTime(event.endsAt) : null;
+  const ratingText = formatVenueRating(event.venueRating, event.venueReviewCount);
+  const priceText = formatPrice(event);
 
   return (
     <Modal
@@ -64,20 +86,20 @@ export function EventDetailModal({ event, visible, onClose }: Props) {
 
             {/* Drag handle */}
             <View className="items-center py-3">
-              <View className="h-1 w-10 rounded-full bg-white/20" />
+              <View className="w-10 h-1 rounded-full bg-white/20" />
             </View>
 
             {/* Close button */}
             <Pressable
               onPress={onClose}
-              className="absolute right-4 top-4 z-10 h-8 w-8 items-center justify-center rounded-full bg-white/10 active:scale-95"
+              className="absolute top-4 right-4 z-10 justify-center items-center w-8 h-8 rounded-full bg-white/10 active:scale-95"
             >
               <Ionicons name="close" size={18} color="rgba(255,255,255,0.8)" />
             </Pressable>
 
             <ScrollView className="px-6 pb-8" showsVerticalScrollIndicator={false}>
               {/* Category pill */}
-              <View className="mb-3 self-start overflow-hidden rounded-full border border-white/15 px-3 py-1">
+              <View className="overflow-hidden self-start px-3 py-1 mb-3 rounded-full border border-white/15">
                 <LinearGradient
                   colors={gradient as unknown as [string, string]}
                   style={{
@@ -105,21 +127,50 @@ export function EventDetailModal({ event, visible, onClose }: Props) {
               ) : null}
 
               {/* Detail rows */}
-              <View className="mt-5 rounded-2xl border border-white/8 bg-white/3 p-4">
+              <View className="p-4 mt-5 rounded-2xl border border-white/8 bg-white/3">
                 <DetailRow icon="location" label="Venue" value={event.venueName} />
+                {ratingText ? (
+                  <DetailRow icon="star" label="Rating" value={ratingText} />
+                ) : null}
                 {event.city ? (
                   <DetailRow icon="navigate" label="City" value={event.city} />
                 ) : null}
                 <DetailRow icon="calendar" label="When" value={startsFormatted + (endsFormatted ? ` → ${endsFormatted}` : '')} />
-                <DetailRow
-                  icon="pricetag"
-                  label="Price"
-                  value={event.isFree ? 'Free' : (event.priceLabel ?? 'Check venue')}
-                />
+                <DetailRow icon="pricetag" label="Price" value={priceText} />
                 {event.radiusMiles != null ? (
                   <DetailRow icon="compass" label="Distance" value={`${event.radiusMiles.toFixed(1)} mi away`} />
                 ) : null}
               </View>
+
+              {/* Ticket offers */}
+              {event.ticketOffers && event.ticketOffers.length > 0 ? (
+                <View className="mt-5">
+                  <Text className="mb-2 text-[11px] uppercase tracking-[2px] text-white/50">Tickets</Text>
+                  <View className="gap-2">
+                    {event.ticketOffers.map((offer, idx) => (
+                      <Pressable
+                        key={idx}
+                        onPress={() => {
+                          if (offer.url) {
+                            Linking.openURL(offer.url);
+                          }
+                        }}
+                        className="flex-row justify-between items-center px-4 py-3 rounded-xl border border-white/8 bg-white/3 active:opacity-70"
+                      >
+                        <View className="flex-1">
+                          <Text className="text-sm font-medium text-white/90">{offer.provider || 'Ticket'}</Text>
+                          {offer.priceLabel ? (
+                            <Text className="text-xs text-white/55">{offer.priceLabel}</Text>
+                          ) : offer.isFree ? (
+                            <Text className="text-xs text-green-400/80">Free</Text>
+                          ) : null}
+                        </View>
+                        <Ionicons name="open-outline" size={16} color="rgba(255,255,255,0.4)" />
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
 
               {/* Vibes */}
               <View className="mt-5">

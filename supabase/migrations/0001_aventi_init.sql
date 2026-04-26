@@ -178,33 +178,6 @@ create table if not exists public.verification_runs (
   details jsonb not null default '{}'::jsonb
 );
 
-create table if not exists public.job_queue (
-  id uuid primary key default gen_random_uuid(),
-  job_type text not null,
-  payload jsonb not null default '{}'::jsonb,
-  status text not null default 'queued',
-  attempts integer not null default 0,
-  max_attempts integer not null default 5,
-  run_at timestamptz not null default now(),
-  locked_at timestamptz,
-  locked_by text,
-  last_error text,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-create index if not exists job_queue_ready_idx on public.job_queue (status, run_at);
-
-create table if not exists public.job_runs (
-  id uuid primary key default gen_random_uuid(),
-  job_id uuid not null references public.job_queue(id) on delete cascade,
-  status text not null,
-  worker_name text,
-  started_at timestamptz not null default now(),
-  finished_at timestamptz,
-  error_message text,
-  log jsonb not null default '{}'::jsonb
-);
-
 -- Hide events after 3 unique reports.
 create or replace function public.aventi_apply_report_threshold()
 returns trigger

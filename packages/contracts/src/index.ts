@@ -3,6 +3,7 @@ export type SwipeAction = 'like' | 'pass';
 export type EventVibeTag =
   | 'chill'
   | 'energetic'
+  | 'intellectual'
   | 'romantic'
   | 'social'
   | 'luxury'
@@ -13,6 +14,13 @@ export type EventVibeTag =
 export type ReportReason = 'invalid' | 'cancelled' | 'duplicate' | 'unsafe' | 'other';
 
 export type EventCategory = 'nightlife' | 'dining' | 'concerts' | 'wellness' | 'experiences';
+
+export interface TicketOffer {
+  url: string;
+  provider?: string | null;
+  priceLabel?: string | null;
+  isFree?: boolean | null;
+}
 
 export interface EventCard {
   id: string;
@@ -30,6 +38,10 @@ export interface EventCard {
   radiusMiles?: number | null;
   vibes: EventVibeTag[];
   tags: string[];
+  // SerpAPI enrichment fields
+  venueRating?: number | null;
+  venueReviewCount?: number | null;
+  ticketOffers?: TicketOffer[];
 }
 
 export interface FeedFilters {
@@ -37,6 +49,8 @@ export interface FeedFilters {
   timeOfDay?: 'morning' | 'afternoon' | 'evening' | 'night';
   price?: 'free' | 'paid' | 'any';
   radiusMiles?: number;
+  vibes?: EventVibeTag[];
+  categories?: EventCategory[];
   premiumAgeRestriction?: 'all' | '18+' | '21+';
 }
 
@@ -51,12 +65,12 @@ export interface FeedRequest {
   marketCountry?: string | null;
 }
 
-export type FeedInventoryStatus = 'ready' | 'warming';
+export type FeedInventoryStatus = 'ready' | 'warming' | 'targeted_warming' | 'no_matches';
 
 export interface FeedResponse {
   items: EventCard[];
   nextCursor?: string | null;
-  fallbackStatus?: 'none' | 'relaxed_filters' | 'insufficient_inventory';
+  fallbackStatus?: 'none' | 'relaxed_filters' | 'insufficient_inventory' | 'no_filter_matches';
   remainingFreeSwipes?: number;
   remainingFreePreferenceActions?: number;
   marketKey?: string | null;

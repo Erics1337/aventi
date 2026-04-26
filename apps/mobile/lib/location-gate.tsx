@@ -49,6 +49,11 @@ interface LocationGateContextValue {
   requestDeviceLocation: () => Promise<void>;
   recheckPermissionAndLocation: () => Promise<void>;
   setTravelModeOverride: (override: TravelModeOverride | null) => Promise<void>;
+  setTravelModeCoordinates: (coordinates: {
+    latitude: number;
+    longitude: number;
+    label?: string;
+  }) => Promise<void>;
 }
 
 const LocationGateContext = createContext<LocationGateContextValue | null>(null);
@@ -84,6 +89,16 @@ export const TRAVEL_MODE_PRESETS: readonly TravelModeOverride[] = [
     latitude: 34.0522,
     longitude: -118.2437,
   },
+  {
+    id: 'toronto',
+    label: 'Toronto',
+    city: 'Toronto',
+    state: 'ON',
+    country: 'CA',
+    timezone: 'America/Toronto',
+    latitude: 43.651070,
+    longitude: -79.347015,
+  },
 ] as const;
 
 function resolveLocalTimezone(): string | null {
@@ -114,6 +129,46 @@ async function reverseGeocodeLocation(latitude: number, longitude: number): Prom
   }
 }
 
+async function buildLocationPoint(latitude: number, longitude: number): Promise<LocationPoint> {
+  const [geocode, timezone] = await Promise.all([
+    reverseGeocodeLocation(latitude, longitude),
+    Promise.resolve(resolveLocalTimezone()),
+  ]);
+  return {
+    latitude,
+    longitude,
+    city: geocode.city,
+    state: geocode.state,
+    country: geocode.country,
+    timezone,
+  };
+}
+
+function formatCoordinateLabel(latitude: number, longitude: number): string {
+  return `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+}
+
+async function buildTravelModeOverride(
+  latitude: number,
+  longitude: number,
+  label?: string,
+): Promise<TravelModeOverride> {
+  const geocode = await reverseGeocodeLocation(latitude, longitude);
+  const geocodeLabel = [geocode.city, geocode.state].filter(Boolean).join(', ');
+  const nextLabel = label?.trim() || geocodeLabel || formatCoordinateLabel(latitude, longitude);
+
+  return {
+    id: `custom:${latitude.toFixed(4)},${longitude.toFixed(4)}`,
+    label: nextLabel,
+    latitude,
+    longitude,
+    city: geocode.city,
+    state: geocode.state,
+    country: geocode.country,
+    timezone: null,
+  };
+}
+
 export function LocationGateProvider({ children }: PropsWithChildren) {
   const auth = useAuthSession();
   const [status, setStatus] = useState<LocationGateStatus>('checking');
@@ -122,14 +177,14 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [profileSyncError, setProfileSyncError] = useState<string | null>(null);
   const lastSyncedSignature = useRef<string | null>(null);
+  const lastMarketSeenSignature = useRef<string | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
 
   const persistProfileLocation = async (location: LocationPoint) => {
     if (!auth.isReady) {
       return;
     }
-    // Anonymous and full-account sessions can sync profile data. Local guest fallback should not.
-    if (!auth.isAuthenticated && auth.isSupabaseConfigured) {
+    if (!auth.isAuthenticated) {
       setProfileSyncError(null);
       return;
     }
@@ -141,70 +196,100 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
       country: location.country ?? null,
       timezone: location.timezone ?? null,
     });
-    if (signature === lastSyncedSignature.current) {
-      return;
+    if (signature !== lastSyncedSignature.current) {
+      try {
+        await aventiApi.updateMyLocation({
+          latitude: location.latitude,
+          longitude: location.longitude,
+          city: location.city ?? null,
+          state: location.state ?? null,
+          country: location.country ?? null,
+          timezone: location.timezone ?? null,
+        });
+        lastSyncedSignature.current = signature;
+        setProfileSyncError(null);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to sync profile location.';
+        setProfileSyncError(message);
+      }
     }
 
-    try {
-      await aventiApi.updateMyLocation({
-        latitude: location.latitude,
-        longitude: location.longitude,
-        city: location.city ?? null,
-        state: location.state ?? null,
-        country: location.country ?? null,
-        timezone: location.timezone ?? null,
-      });
-      lastSyncedSignature.current = signature;
-      setProfileSyncError(null);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to sync profile location.';
-      setProfileSyncError(message);
+    // Tell the backend this market is currently being used. Bootstraps a new
+    // market_inventory_state row + fires an immediate short-term scan on
+    // first sighting; otherwise just bumps last_user_active_at. Fire-and-forget:
+    // we don't want scan-queue failures to block the UI.
+    const marketSeenSignature = JSON.stringify({
+      latitude: Number(location.latitude.toFixed(4)),
+      longitude: Number(location.longitude.toFixed(4)),
+      city: location.city ?? null,
+      state: location.state ?? null,
+      country: location.country ?? null,
+    });
+    if (location.city && marketSeenSignature !== lastMarketSeenSignature.current) {
+      try {
+        await aventiApi.markMarketSeen({
+          city: location.city,
+          state: location.state ?? null,
+          country: location.country ?? null,
+          latitude: location.latitude,
+          longitude: location.longitude,
+        });
+        lastMarketSeenSignature.current = marketSeenSignature;
+      } catch {
+        // Non-fatal: cron will still pick this market up next Monday.
+      }
     }
   };
 
-  const resolveCurrentPosition = async (allowDevFallback: boolean) => {
+  const applyResolvedLocation = (location: LocationPoint, nextErrorMessage: string | null = null) => {
+    startTransition(() => {
+      setDeviceLocation(location);
+      setStatus('ready');
+      setErrorMessage(nextErrorMessage);
+    });
+    void persistProfileLocation(location);
+  };
+
+  const resolveCurrentPosition = async (options?: {
+    preferLastKnown?: boolean;
+    preserveReadyState?: boolean;
+    travelOverrideForEvaluation?: TravelModeOverride | null;
+  }) => {
+    let seededFromLastKnown = false;
+    const fallbackTravelOverride =
+      options?.travelOverrideForEvaluation === undefined
+        ? travelModeOverride
+        : options.travelOverrideForEvaluation;
+
+    if (options?.preferLastKnown && !deviceLocation) {
+      try {
+        const lastKnown = await Location.getLastKnownPositionAsync();
+        if (lastKnown?.coords) {
+          const cachedLocation = await buildLocationPoint(lastKnown.coords.latitude, lastKnown.coords.longitude);
+          seededFromLastKnown = true;
+          applyResolvedLocation(cachedLocation);
+        }
+      } catch {
+        // Ignore missing last-known coordinates and continue to a fresh GPS lookup.
+      }
+    }
+
     try {
       const position = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
-      const latitude = position.coords.latitude;
-      const longitude = position.coords.longitude;
-      const [geocode, timezone] = await Promise.all([
-        reverseGeocodeLocation(latitude, longitude),
-        Promise.resolve(resolveLocalTimezone()),
-      ]);
-      const location: LocationPoint = {
-        latitude,
-        longitude,
-        city: geocode.city,
-        state: geocode.state,
-        country: geocode.country,
-        timezone,
-      };
-
-      startTransition(() => {
-        setDeviceLocation(location);
-        setStatus('ready');
-        setErrorMessage(null);
-      });
-      void persistProfileLocation(location);
+      const location = await buildLocationPoint(position.coords.latitude, position.coords.longitude);
+      applyResolvedLocation(location);
       return;
     } catch {
-      if (allowDevFallback && __DEV__) {
-        const devFallback: LocationPoint = {
-          latitude: 30.2672,
-          longitude: -97.7431,
-          city: 'Austin',
-          state: 'TX',
-          country: 'US',
-          timezone: 'America/Chicago',
-        };
+      if (seededFromLastKnown || (options?.preserveReadyState && deviceLocation)) {
+        return;
+      }
+      if (fallbackTravelOverride) {
         startTransition(() => {
-          setDeviceLocation(devFallback);
           setStatus('ready');
-          setErrorMessage('Using Austin fallback coordinates (development only).');
+          setErrorMessage(null);
         });
-        void persistProfileLocation(devFallback);
         return;
       }
 
@@ -215,17 +300,36 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
     }
   };
 
-  const recheckPermissionAndLocation = async () => {
+  const checkPermissionAndLocation = async ({
+    preserveReadyState = false,
+    travelOverrideForEvaluation,
+  }: {
+    preserveReadyState?: boolean;
+    travelOverrideForEvaluation?: TravelModeOverride | null;
+  } = {}) => {
+    const fallbackTravelOverride =
+      travelOverrideForEvaluation === undefined ? travelModeOverride : travelOverrideForEvaluation;
     try {
-      setStatus('checking');
+      if (!preserveReadyState || !deviceLocation) {
+        setStatus('checking');
+      }
       const permission = await Location.getForegroundPermissionsAsync();
 
       if (permission.status === 'granted') {
-        await resolveCurrentPosition(false);
+        await resolveCurrentPosition({
+          preferLastKnown: !deviceLocation,
+          preserveReadyState,
+          travelOverrideForEvaluation: fallbackTravelOverride,
+        });
         return;
       }
 
       setDeviceLocation(null);
+      if (fallbackTravelOverride) {
+        setStatus('ready');
+        setErrorMessage(null);
+        return;
+      }
       setStatus(permission.status === 'denied' ? 'denied' : 'needs-permission');
       if (permission.status === 'denied') {
         setErrorMessage('Location permission is required to initialize your local feed.');
@@ -233,9 +337,18 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
         setErrorMessage(null);
       }
     } catch {
+      if (fallbackTravelOverride) {
+        setStatus('ready');
+        setErrorMessage(null);
+        return;
+      }
       setStatus('error');
       setErrorMessage('Failed to check location permission. Retry in a moment.');
     }
+  };
+
+  const recheckPermissionAndLocation = async () => {
+    await checkPermissionAndLocation();
   };
 
   const requestDeviceLocation = async () => {
@@ -244,27 +357,35 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
       const permission = await Location.requestForegroundPermissionsAsync();
       if (permission.status !== 'granted') {
         setDeviceLocation(null);
-        setStatus('denied');
-        setErrorMessage('Location permission is required to initialize your local feed.');
+        if (travelModeOverride) {
+          setStatus('ready');
+          setErrorMessage(null);
+        } else {
+          setStatus('denied');
+          setErrorMessage('Location permission is required to initialize your local feed.');
+        }
         return;
       }
-      await resolveCurrentPosition(true);
+      await resolveCurrentPosition();
     } catch {
+      if (travelModeOverride) {
+        setStatus('ready');
+        setErrorMessage(null);
+        return;
+      }
       setStatus('error');
       setErrorMessage('Unable to request location permission. Try again.');
     }
   };
 
   const setTravelModeOverride = async (override: TravelModeOverride | null) => {
-    if (override && !deviceLocation) {
-      setErrorMessage('Enable device location first. Travel Mode is an override, not initial setup.');
-      return;
-    }
-
     startTransition(() => {
       setTravelModeOverrideState(override);
-      if (override) {
+      if (override || !deviceLocation) {
         setErrorMessage(null);
+      }
+      if (override && !deviceLocation) {
+        setStatus('ready');
       }
     });
 
@@ -277,15 +398,35 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
     } catch {
       // Ignore storage failures; override still works for the current session.
     }
+
+    if (!override && !deviceLocation) {
+      await checkPermissionAndLocation({ travelOverrideForEvaluation: null });
+    }
+  };
+
+  const setTravelModeCoordinates = async ({
+    latitude,
+    longitude,
+    label,
+  }: {
+    latitude: number;
+    longitude: number;
+    label?: string;
+  }) => {
+    const override = await buildTravelModeOverride(latitude, longitude, label);
+    await setTravelModeOverride(override);
   };
 
   useEffect(() => {
     let active = true;
 
-    (async () => {
+    void (async () => {
+      let restoredOverride: TravelModeOverride | null = null;
+
       try {
         const stored = await AsyncStorage.getItem(TRAVEL_MODE_STORAGE_KEY);
         if (!active || !stored) {
+          await checkPermissionAndLocation();
           return;
         }
         const parsed = JSON.parse(stored) as Partial<TravelModeOverride>;
@@ -295,7 +436,7 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
           typeof parsed.latitude === 'number' &&
           typeof parsed.longitude === 'number'
         ) {
-          setTravelModeOverrideState({
+          restoredOverride = {
             id: parsed.id,
             label: parsed.label,
             latitude: parsed.latitude,
@@ -304,14 +445,17 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
             state: typeof parsed.state === 'string' ? parsed.state : null,
             country: typeof parsed.country === 'string' ? parsed.country : null,
             timezone: typeof parsed.timezone === 'string' ? parsed.timezone : null,
-          });
+          };
+          setTravelModeOverrideState(restoredOverride);
         }
       } catch {
         // Ignore invalid stored travel overrides.
       }
+      if (!active) {
+        return;
+      }
+      await checkPermissionAndLocation({ travelOverrideForEvaluation: restoredOverride });
     })();
-
-    void recheckPermissionAndLocation();
 
     return () => {
       active = false;
@@ -323,7 +467,7 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
       const becameActive = appStateRef.current !== 'active' && nextState === 'active';
       appStateRef.current = nextState;
       if (becameActive) {
-        void recheckPermissionAndLocation();
+        void checkPermissionAndLocation({ preserveReadyState: true });
       }
     });
 
@@ -333,11 +477,25 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
   }, []);
 
   useEffect(() => {
-    if (travelModeOverride && !deviceLocation && status !== 'checking') {
-      setTravelModeOverrideState(null);
-      void AsyncStorage.removeItem(TRAVEL_MODE_STORAGE_KEY);
-    }
-  }, [deviceLocation, status, travelModeOverride]);
+    const activeLocation = travelModeOverride ?? deviceLocation;
+    if (!activeLocation) return;
+    void persistProfileLocation(activeLocation);
+  }, [
+    auth.isAuthenticated,
+    auth.isReady,
+    deviceLocation?.city,
+    deviceLocation?.country,
+    deviceLocation?.latitude,
+    deviceLocation?.longitude,
+    deviceLocation?.state,
+    deviceLocation?.timezone,
+    travelModeOverride?.city,
+    travelModeOverride?.country,
+    travelModeOverride?.latitude,
+    travelModeOverride?.longitude,
+    travelModeOverride?.state,
+    travelModeOverride?.timezone,
+  ]);
 
   const value = useMemo<LocationGateContextValue>(() => {
     const effectiveLocation = travelModeOverride
@@ -359,13 +517,14 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
       deviceLocation,
       effectiveLocation,
       travelModeOverride,
-      canUseTravelMode: Boolean(deviceLocation),
+      canUseTravelMode: true,
       isTravelModeActive: Boolean(travelModeOverride),
       errorMessage,
       profileSyncError,
       requestDeviceLocation,
       recheckPermissionAndLocation,
       setTravelModeOverride,
+      setTravelModeCoordinates,
     };
   }, [deviceLocation, errorMessage, profileSyncError, status, travelModeOverride]);
 

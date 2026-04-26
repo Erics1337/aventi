@@ -63,20 +63,6 @@ class VerificationService:
         repo = JobQueueRepository(self.session)
         count = 0
         for event_id in ids:
-            existing_job = await self.session.scalar(
-                text(
-                    """
-                    select count(*)
-                    from public.job_queue
-                    where job_type = 'VERIFY_EVENT'
-                      and status in ('queued', 'running')
-                      and payload ->> 'eventId' = :event_id
-                    """
-                ),
-                {"event_id": event_id},
-            )
-            if int(existing_job or 0) > 0:
-                continue
             latest_verification = await self.session.scalar(
                 text(
                     """

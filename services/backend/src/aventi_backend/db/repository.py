@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import json
 from typing import Any
@@ -9,7 +8,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from aventi_backend.core.settings import Settings, get_settings
+from aventi_backend.core.settings import get_settings
 from aventi_backend.models.schemas import (
     FeedImpressionPayload,
     MembershipEntitlements,
@@ -17,17 +16,18 @@ from aventi_backend.models.schemas import (
     SwipePayload,
     UserPreferences,
 )
-from aventi_backend.services.feed import get_seed_feed
 from aventi_backend.services.market_inventory import (
+    build_market_descriptor,
     ELIGIBLE_VERIFICATION_STATUSES,
     MarketWarmupService,
-    build_market_descriptor,
 )
 from aventi_backend.services.personalization import apply_vibe_update
+from aventi_backend.db.feed_query import FeedQueryBuilder, FeedItemFilter, FeedFilterContext
 
 _SUPPORTED_VIBE_TAGS = {
     "chill",
     "energetic",
+    "intellectual",
     "romantic",
     "social",
     "luxury",
@@ -35,6 +35,7 @@ _SUPPORTED_VIBE_TAGS = {
     "wellness",
     "late-night",
 }
+_DEFAULT_RADIUS_MILES = 25.0
 
 
 def _canonical_user_uuid(user_id: str) -> str:
@@ -50,26 +51,10 @@ def _utc_day_bounds(now: datetime) -> tuple[datetime, datetime]:
     return start, end
 
 
-def _time_of_day_matches(starts_at: datetime, bucket: str | None) -> bool:
-    if not bucket:
-        return True
-    hour = starts_at.astimezone(timezone.utc).hour
-    if bucket == "morning":
-        return 5 <= hour < 12
-    elif bucket == "afternoon":
-        return 12 <= hour < 17
-    elif bucket == "evening":
-        return 17 <= hour < 22
-    elif bucket == "night":
-        return hour >= 22 or hour < 5
-    else:
-        return True
-
-
 def _date_window(date_filter: str, now: datetime) -> tuple[datetime, datetime]:
     now = now.astimezone(timezone.utc)
     if date_filter == "today":
-        start = now
+        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
         return start, end
     if date_filter == "tomorrow":
@@ -86,24 +71,6 @@ def _date_window(date_filter: str, now: datetime) -> tuple[datetime, datetime]:
     return saturday, saturday + timedelta(days=2)
 
 
-def _haversine_miles(lat1: float, lon1: float, lat2: float | None, lon2: float | None) -> float | None:
-    if lat2 is None or lon2 is None:
-        return None
-    # Light approximation is fine for scaffold filtering.
-    from math import acos, cos, radians, sin
-
-    return 3958.7613 * acos(
-        min(
-            1.0,
-            max(
-                -1.0,
-                cos(radians(lat1)) * cos(radians(lat2)) * cos(radians(lon2) - radians(lon1))
-                + sin(radians(lat1)) * sin(radians(lat2)),
-            ),
-        )
-    )
-
-
 def _decode_offset_cursor(cursor: str | None) -> int:
     if not cursor:
         return 0
@@ -115,22 +82,6 @@ def _decode_offset_cursor(cursor: str | None) -> int:
 
 def _encode_offset_cursor(offset: int) -> str | None:
     return str(offset) if offset > 0 else None
-
-
-@dataclass(slots=True)
-class _MemoryState:
-    profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
-    preferences: dict[str, dict[str, Any]] = field(default_factory=dict)
-    favorites: dict[str, set[str]] = field(default_factory=dict)
-    reports: dict[str, set[str]] = field(default_factory=dict)
-    hidden_events: set[str] = field(default_factory=set)
-    swipes: dict[str, list[datetime]] = field(default_factory=dict)
-    vibe_weights: dict[str, dict[str, float]] = field(default_factory=dict)
-    entitlements: dict[str, dict[str, Any]] = field(default_factory=dict)
-    feed_impressions: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
-
-
-_MEMORY_STATE = _MemoryState()
 
 
 class AventiRepository:
@@ -160,10 +111,13 @@ class AventiRepository:
         time_of_day: str | None,
         price: str | None,
         radius_miles: float | None,
+        selected_vibes: list[str] | None,
+        categories: list[str] | None,
         cursor: str | None,
         market_city: str | None,
         market_state: str | None,
         market_country: str | None,
+        force_refresh: bool = False,
     ) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -203,225 +157,8 @@ class AventiRepository:
     async def get_entitlements(self, user_id: str, email: str | None) -> MembershipEntitlements:
         raise NotImplementedError
 
-
-class InMemoryAventiRepository(AventiRepository):
-    def __init__(self, state: _MemoryState) -> None:
-        self.state = state
-
-    async def bootstrap_user(self, user_id: str, email: str | None) -> dict[str, Any]:
-        created = user_id not in self.state.profiles
-        self.state.profiles.setdefault(
-            user_id,
-            {
-                "id": user_id,
-                "email": email,
-                "city": None,
-                "timezone": None,
-                "latitude": None,
-                "longitude": None,
-                "onboarding_completed": False,
-            },
-        )
-        self.state.preferences.setdefault(
-            user_id,
-            {"categories": [], "vibes": [], "city": None, "radiusMiles": 10},
-        )
-        self.state.entitlements.setdefault(
-            user_id,
-            {
-                "isPremium": False,
-                "plan": "free",
-                "unlimitedSwipes": False,
-                "advancedFilters": False,
-                "travelMode": False,
-                "insiderTips": False,
-                "validUntil": None,
-            },
-        )
-        return {
-            "id": user_id,
-            "email": email,
-            "created": created,
-            "profile": {
-                "city": self.state.profiles[user_id]["city"],
-                "timezone": self.state.profiles[user_id]["timezone"],
-                "latitude": self.state.profiles[user_id]["latitude"],
-                "longitude": self.state.profiles[user_id]["longitude"],
-                "onboarded": self.state.profiles[user_id]["onboarding_completed"],
-            },
-        }
-
-    async def get_me(self, user_id: str, email: str | None) -> dict[str, Any]:
-        await self.bootstrap_user(user_id, email)
-        profile = self.state.profiles[user_id]
-        prefs = self.state.preferences[user_id]
-        return {
-            "id": user_id,
-            "email": profile.get("email") or email,
-            "preferences": prefs,
-            "profile": {
-                "city": profile.get("city"),
-                "timezone": profile.get("timezone"),
-                "latitude": profile.get("latitude"),
-                "longitude": profile.get("longitude"),
-                "onboarded": profile.get("onboarding_completed"),
-            },
-        }
-
-    async def update_preferences(self, user_id: str, payload: UserPreferences) -> dict[str, Any]:
-        current = self.state.preferences.setdefault(
-            user_id, {"categories": [], "vibes": [], "city": None, "radiusMiles": 10}
-        )
-        current.update(payload.model_dump(by_alias=True))
-        return {"ok": True, "userId": user_id, "preferences": current}
-
-    async def update_profile_location(
-        self, user_id: str, email: str | None, payload: ProfileLocationPayload
-    ) -> dict[str, Any]:
-        await self.bootstrap_user(user_id, email)
-        profile = self.state.profiles[user_id]
-        profile["city"] = payload.city
-        profile["timezone"] = payload.timezone
-        profile["latitude"] = payload.latitude
-        profile["longitude"] = payload.longitude
-        profile["onboarding_completed"] = True
-        return {
-            "ok": True,
-            "userId": user_id,
-            "profile": {
-                "city": profile["city"],
-                "timezone": profile["timezone"],
-                "latitude": profile["latitude"],
-                "longitude": profile["longitude"],
-                "onboarded": profile["onboarding_completed"],
-            },
-        }
-
-    async def get_feed(
-        self,
-        *,
-        user_id: str,
-        settings: Settings,
-        date: str,
-        latitude: float,
-        longitude: float,
-        limit: int,
-        time_of_day: str | None,
-        price: str | None,
-        radius_miles: float | None,
-        cursor: str | None,
-        market_city: str | None,
-        market_state: str | None,
-        market_country: str | None,
-    ) -> dict[str, Any]:
-        _ = (user_id, date, latitude, longitude, time_of_day, price, radius_miles, market_state)
-        response = get_seed_feed(settings).model_dump(by_alias=True)
-        items = [item for item in response["items"] if item["id"] not in self.state.hidden_events]
-        offset = _decode_offset_cursor(cursor)
-        response["items"] = items[offset : offset + limit]
-        response["nextCursor"] = (
-            _encode_offset_cursor(offset + limit) if len(items) > offset + limit else None
-        )
-        now = datetime.now(tz=timezone.utc)
-        remaining = self._remaining_free_swipes(user_id, settings, now)
-        response["remainingFreeSwipes"] = remaining
-        response["remainingFreePreferenceActions"] = remaining
-        response["inventoryStatus"] = "ready"
-        response["warmupTriggered"] = False
-        response["marketKey"] = (
-            f"{market_city.strip().lower()}|{(market_state or '').strip().lower()}|{(market_country or 'US').strip().lower()}"
-            if market_city and market_city.strip()
-            else None
-        )
-        if not response["items"]:
-            response["fallbackStatus"] = "insufficient_inventory"
-            if response["marketKey"]:
-                response["inventoryStatus"] = "warming"
-        return response
-
-    def _remaining_free_swipes(self, user_id: str, settings: Settings, now: datetime) -> int:
-        start, end = _utc_day_bounds(now)
-        swipes = self.state.swipes.get(user_id, [])
-        todays = [t for t in swipes if start <= t < end]
-        self.state.swipes[user_id] = todays
-        return max(0, settings.free_swipe_limit - len(todays))
-
-    async def record_swipe(
-        self,
-        *,
-        user_id: str,
-        email: str | None,
-        payload: SwipePayload,
-        settings: Settings,
-    ) -> dict[str, Any]:
-        await self.bootstrap_user(user_id, email)
-        now = datetime.now(tz=timezone.utc)
-        remaining_before = self._remaining_free_swipes(user_id, settings, now)
-        if remaining_before <= 0:
-            raise PermissionError("Free preference action limit reached")
-        self.state.swipes.setdefault(user_id, []).append(now)
-        self.state.vibe_weights[user_id] = apply_vibe_update(
-            self.state.vibe_weights.get(user_id, {}), payload.vibes, payload.action
-        )
-        remaining_after = self._remaining_free_swipes(user_id, settings, now)
-        return {
-            "accepted": True,
-            "remainingFreeSwipes": remaining_after,
-            "remainingFreePreferenceActions": remaining_after,
-        }
-
-    async def record_feed_impression(
-        self,
-        *,
-        user_id: str,
-        email: str | None,
-        payload: FeedImpressionPayload,
-    ) -> dict[str, Any]:
-        await self.bootstrap_user(user_id, email)
-        self.state.feed_impressions.setdefault(user_id, []).append(
-            {
-                "eventId": payload.event_id,
-                "servedAt": (payload.served_at or datetime.now(tz=timezone.utc)).isoformat(),
-                "position": payload.position,
-                "affinityScore": payload.affinity_score,
-                "filters": payload.filters,
-            }
-        )
-        return {"ok": True}
-
-    async def list_favorites(self, user_id: str) -> dict[str, Any]:
-        favorite_ids = sorted(self.state.favorites.get(user_id, set()))
-        seed_items = get_seed_feed(get_settings()).model_dump(by_alias=True)["items"]
-        seed_by_id = {str(item["id"]): item for item in seed_items}
-        events = [seed_by_id[favorite_id] for favorite_id in favorite_ids if favorite_id in seed_by_id]
-        return {"items": favorite_ids, "events": events}
-
-    async def save_favorite(self, user_id: str, event_id: str) -> dict[str, Any]:
-        self.state.favorites.setdefault(user_id, set()).add(event_id)
-        return {"ok": True, "eventId": event_id}
-
-    async def delete_favorite(self, user_id: str, event_id: str) -> dict[str, Any]:
-        self.state.favorites.setdefault(user_id, set()).discard(event_id)
-        return {"ok": True, "eventId": event_id}
-
-    async def report_event(
-        self, user_id: str, event_id: str, reason: str, details: str | None
-    ) -> dict[str, Any]:
-        _ = (reason, details)
-        reporters = self.state.reports.setdefault(event_id, set())
-        reporters.add(user_id)
-        if len(reporters) >= 3:
-            self.state.hidden_events.add(event_id)
-        return {
-            "ok": True,
-            "eventId": event_id,
-            "reportCount": len(reporters),
-            "hidden": event_id in self.state.hidden_events,
-        }
-
-    async def get_entitlements(self, user_id: str, email: str | None) -> MembershipEntitlements:
-        await self.bootstrap_user(user_id, email)
-        return MembershipEntitlements.model_validate(self.state.entitlements[user_id])
+    async def reset_seen_events(self, user_id: str) -> dict[str, Any]:
+        raise NotImplementedError
 
 
 class PostgresAventiRepository(AventiRepository):
@@ -633,178 +370,24 @@ class PostgresAventiRepository(AventiRepository):
         time_of_day: str | None,
         price: str | None,
         radius_miles: float | None,
+        selected_vibes: list[str] | None,
+        categories: list[str] | None,
         cursor: str | None,
         market_city: str | None,
         market_state: str | None,
         market_country: str | None,
+        force_refresh: bool = False,
     ) -> dict[str, Any]:
         offset = _decode_offset_cursor(cursor)
         now = datetime.now(tz=timezone.utc)
         await self.bootstrap_user(user_id, None)
         start_ts, end_ts = _date_window(date, now)
         db_user_id = _canonical_user_uuid(user_id)
-        price_clause = ""
-        query_params: dict[str, Any] = {
-            "start_ts": start_ts,
-            "end_ts": end_ts,
-            "limit_rows": max((offset + limit) * 4, 20),
-            "eligible_statuses": list(ELIGIBLE_VERIFICATION_STATUSES),
-        }
-        if price in {"free", "paid"}:
-            price_clause = "and e.is_free = :is_free"
-            query_params["is_free"] = price == "free"
 
-        recent_passes_result = await self.session.execute(
-            text(
-                """
-                select sa.event_id::text as event_id, e.normalized_title
-                from public.swipe_actions sa
-                join public.events e on e.id = sa.event_id
-                where sa.user_id = :user_id
-                  and sa.action = 'pass'
-                order by sa.created_at desc
-                limit 100
-                """
-            ),
-            {"user_id": db_user_id},
-        )
-        recent_passed_event_ids: set[str] = set()
-        recent_passed_titles: set[str] = set()
-        for row in recent_passes_result.mappings().all():
-            recent_passed_event_ids.add(str(row["event_id"]))
-            normalized_title = row.get("normalized_title")
-            if normalized_title:
-                recent_passed_titles.add(str(normalized_title))
-
-        weights_result = await self.session.execute(
-            text(
-                """
-                select vibe, weight
-                from public.user_vibe_weights
-                where user_id = :user_id
-                """
-            ),
-            {"user_id": db_user_id},
-        )
-        user_weights = {str(row[0]): float(row[1]) for row in weights_result.all()}
-
-        result = await self.session.execute(
-            text(
-                """
-                with next_occurrence as (
-                  select distinct on (eo.event_id)
-                    eo.event_id,
-                    eo.starts_at,
-                    eo.ends_at
-                  from public.event_occurrences eo
-                  where eo.cancelled = false
-                    and eo.starts_at >= :start_ts
-                    and eo.starts_at < :end_ts
-                  order by eo.event_id, eo.starts_at asc
-                )
-                select
-                  e.id::text as id,
-                  e.title,
-                  e.normalized_title,
-                  coalesce(e.description, '') as description,
-                  e.category,
-                  coalesce(v.name, 'Unknown Venue') as venue_name,
-                  coalesce(v.city, '') as city,
-                  no.starts_at,
-                  no.ends_at,
-                  e.booking_url,
-                  e.image_url,
-                  e.price_label,
-                  e.is_free,
-                  e.verification_status,
-                  v.latitude,
-                  v.longitude
-                from public.events e
-                join next_occurrence no on no.event_id = e.id
-                left join public.venues v on v.id = e.venue_id
-                where e.hidden = false
-                  and e.verification_status = any(:eligible_statuses)
-                  {price_clause}
-                order by no.starts_at asc, e.created_at desc
-                limit :limit_rows
-                """
-                .format(price_clause=price_clause)
-            ),
-            query_params,
-        )
-        rows = [dict(row) for row in result.mappings().all()]
-
-        event_ids = [row["id"] for row in rows]
-        tag_map: dict[str, list[str]] = {event_id: [] for event_id in event_ids}
-        if event_ids:
-            tag_result = await self.session.execute(
-                text(
-                    """
-                    select event_id::text as event_id, tag, tag_type
-                    from public.event_tags
-                    where event_id in :event_ids
-                    order by event_id, tag_type, tag
-                    """
-                ).bindparams(bindparam("event_ids", expanding=True)),
-                {"event_ids": event_ids},
-            )
-            for row in tag_result.mappings().all():
-                tag_map.setdefault(row["event_id"], []).append(str(row["tag"]))
-
-        scored_items: list[tuple[float, datetime, dict[str, Any]]] = []
-        for row in rows:
-            if row["id"] in recent_passed_event_ids:
-                continue
-            if row.get("normalized_title") and str(row["normalized_title"]) in recent_passed_titles:
-                continue
-
-            miles = _haversine_miles(latitude, longitude, row.get("latitude"), row.get("longitude"))
-            if radius_miles is not None and miles is not None and miles > radius_miles:
-                continue
-            starts_at = row["starts_at"]
-            if not _time_of_day_matches(starts_at, time_of_day):
-                continue
-
-            tags = tag_map.get(row["id"], [])
-            vibes = [tag for tag in tags if tag in _SUPPORTED_VIBE_TAGS]
-            effective_vibes = vibes or ["social"]
-            affinity = sum(user_weights.get(vibe, 1.0) for vibe in effective_vibes)
-            # Small freshness bias: earlier events win tie-breaks.
-            freshness_bias = max(0.0, 1_000_000_000 - starts_at.timestamp()) * 1e-12
-            item = {
-                "id": row["id"],
-                "title": row["title"],
-                "description": row["description"],
-                "category": row["category"],
-                "venueName": row["venue_name"],
-                "city": row["city"],
-                "startsAt": starts_at.isoformat(),
-                "endsAt": row["ends_at"].isoformat() if row["ends_at"] else None,
-                "bookingUrl": row["booking_url"],
-                "imageUrl": row["image_url"],
-                "priceLabel": row["price_label"],
-                "isFree": bool(row["is_free"]),
-                "radiusMiles": miles,
-                "vibes": effective_vibes,
-                "tags": tags,
-            }
-            scored_items.append(
-                (
-                    affinity + freshness_bias,
-                    starts_at,
-                    item,
-                )
-            )
-
-        scored_items.sort(key=lambda entry: (-entry[0], entry[1]))
-        page_slice = scored_items[offset : offset + limit]
-        items = [item for _, _, item in page_slice]
-        next_cursor = (
-            _encode_offset_cursor(offset + limit) if len(scored_items) > offset + limit else None
-        )
-
-        remaining = await self._remaining_free_swipes(user_id, settings, now)
-        fallback_status = "none" if items else "insufficient_inventory"
+        # Build market descriptor (used for returning marketKey in response).
+        # We no longer compute visible_count here because the cron scheduler
+        # owns warmup decisions; repeat computation was wasted work on every
+        # feed request.
         market_descriptor = build_market_descriptor(
             city=market_city,
             state=market_state,
@@ -812,13 +395,52 @@ class PostgresAventiRepository(AventiRepository):
             center_latitude=latitude,
             center_longitude=longitude,
         )
-        market_key: str | None = None
-        inventory_status = "ready"
+
+        # Execute query using builder
+        query_result = await FeedQueryBuilder(
+            session=self.session,
+            user_id=db_user_id,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            eligible_statuses=list(ELIGIBLE_VERIFICATION_STATUSES),
+            seen_window_days=settings.seen_events_window_days,
+        ).with_price_filter(price).execute()
+
+        # Filter and score results
+        filter_context = FeedFilterContext(
+            user_latitude=latitude,
+            user_longitude=longitude,
+            radius_miles=radius_miles,
+            time_of_day=time_of_day,
+            selected_vibes=selected_vibes,
+            categories=categories,
+            supported_vibe_tags=_SUPPORTED_VIBE_TAGS,
+        )
+        scored_items = FeedItemFilter(filter_context).filter_and_score(query_result)
+
+        # Sort, paginate, and extract items
+        scored_items.sort(key=lambda entry: (-entry[0], entry[1]))
+        page_slice = scored_items[offset : offset + limit]
+        items = [item for _, _, item in page_slice]
+        next_cursor = (
+            _encode_offset_cursor(offset + limit) if len(scored_items) > offset + limit else None
+        )
+
+        # Calculate remaining swipes
+        remaining = await self._remaining_free_swipes(user_id, settings, now)
+
+        fallback_status = "none" if items else "insufficient_inventory"
+        market_key: str | None = market_descriptor.key if market_descriptor is not None else None
+        inventory_status = "ready" if items else "no_matches"
         warmup_triggered = False
-        if market_descriptor is not None:
+
+        if market_descriptor is not None and not items:
             market_key, inventory_status, warmup_triggered = await MarketWarmupService(
                 self.session
-            ).request_warmup(market_descriptor)
+            ).request_warmup(
+                market_descriptor,
+                force_refresh=force_refresh,
+            )
 
         return {
             "items": items,
@@ -851,8 +473,14 @@ class PostgresAventiRepository(AventiRepository):
         await self.session.execute(
             text(
                 """
-                insert into public.swipe_actions (user_id, event_id, action, surfaced_at, position)
-                values (:user_id, :event_id, :action, :surfaced_at, :position)
+                insert into public.swipe_actions (
+                    user_id, event_id, action, surfaced_at, position, market_key
+                )
+                select :user_id, :event_id, :action, :surfaced_at, :position,
+                       lower(v.city) || '|' || lower(coalesce(v.state, '')) || '|' || lower(coalesce(v.country, 'us'))
+                  from public.events e
+                  join public.venues v on v.id = e.venue_id
+                 where e.id = :event_id
                 """
             ),
             {
@@ -914,16 +542,15 @@ class PostgresAventiRepository(AventiRepository):
             text(
                 """
                 insert into public.feed_impressions (
-                  user_id, event_id, served_at, position, affinity_score, filters
+                  user_id, event_id, served_at, position, affinity_score, filters, market_key
                 )
-                values (
-                  :user_id,
-                  :event_id,
-                  coalesce(:served_at, now()),
-                  :position,
-                  :affinity_score,
-                  cast(:filters as jsonb)
-                )
+                select :user_id, :event_id,
+                       coalesce(:served_at, now()),
+                       :position, :affinity_score, cast(:filters as jsonb),
+                       lower(v.city) || '|' || lower(coalesce(v.state, '')) || '|' || lower(coalesce(v.country, 'us'))
+                  from public.events e
+                  join public.venues v on v.id = e.venue_id
+                 where e.id = :event_id
                 """
             ),
             {
@@ -1124,11 +751,15 @@ class PostgresAventiRepository(AventiRepository):
             validUntil=valid_until,
         )
 
+    async def reset_seen_events(self, user_id: str) -> dict[str, Any]:
+        db_user_id = _canonical_user_uuid(user_id)
+        result = await self.session.execute(
+            text("delete from public.feed_impressions where user_id = :user_id"),
+            {"user_id": db_user_id},
+        )
+        await self.session.commit()
+        return {"ok": True, "deleted": result.rowcount}
 
-_MEMORY_REPOSITORY = InMemoryAventiRepository(_MEMORY_STATE)
 
-
-def build_repository(session: AsyncSession | None) -> AventiRepository:
-    if session is None:
-        return _MEMORY_REPOSITORY
+def build_repository(session: AsyncSession) -> AventiRepository:
     return PostgresAventiRepository(session)

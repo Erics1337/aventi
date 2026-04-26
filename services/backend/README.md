@@ -99,6 +99,8 @@ Pipeline:
    - verification freshness rules (max verification age and unverified grace window)
    - optional `radiusMiles` and `timeOfDay`
 3. Apply per-user dedupe:
+   - exclude saved event IDs
+   - exclude saved normalized titles
    - exclude recently passed event IDs
    - exclude recently passed normalized titles
 4. Score each candidate:

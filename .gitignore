@@ -48,3 +48,8 @@ coverage/
 crash.log
 *.tfvars
 *.tfvars.json
+
+# Supabase
+supabase/.temp
+
+.agents

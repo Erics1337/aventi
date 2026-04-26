@@ -1,12 +1,15 @@
-# Aventi AWS Terraform (Scaffold)
+# Aventi AWS Terraform
 
-This directory contains the initial Terraform structure for:
-- ECR repos (API/worker)
-- ECS Fargate cluster/services
-- ALB + target groups
-- EventBridge schedules
+This directory now manages a dev-first AWS baseline:
+- ECR repositories with lifecycle cleanup
 - CloudWatch log groups
-- IAM roles
-- Secrets references for Supabase/runtime env
+- ECS cluster, IAM roles, and API/worker task definitions
+- Optional runtime secret placeholder
+- Optional API service and ALB, both disabled by default
 
-The current files are placeholders and safe defaults meant to be expanded with environment-specific values.
+The default Terraform path keeps the account near-zero cost while still making
+the deployment shape explicit in code.
+
+This Terraform belongs to the `aventi` repo and should only manage Aventi AWS
+infrastructure. Separate products or sites should keep their own infrastructure
+code in their own repos so we do not couple unrelated stacks together.

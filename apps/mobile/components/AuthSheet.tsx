@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   Text,
@@ -10,20 +10,10 @@ import {
   View,
 } from 'react-native';
 import { GlassPanel } from './GlassPanel';
-import { type AuthPromptReason, useAuthSession } from '../lib/auth-session';
+import { formatAuthError, type AuthPromptReason, useAuthSession } from '../lib/auth-session';
 
 type FormMode = 'signin' | 'signup';
 const captchaSiteKey = process.env.EXPO_PUBLIC_HCAPTCHA_SITE_KEY;
-
-function formatAuthError(error: unknown): string {
-  const message = error instanceof Error ? error.message : 'Authentication failed';
-  if (message.toLowerCase().includes('captcha')) {
-    return captchaSiteKey
-      ? 'CAPTCHA is enabled for Supabase Auth, but this mobile build is not sending a CAPTCHA token yet. Wire the hCaptcha challenge before retrying.'
-      : 'CAPTCHA is enabled for Supabase Auth. Add EXPO_PUBLIC_HCAPTCHA_SITE_KEY and wire an hCaptcha challenge in the mobile auth flow before retrying.';
-  }
-  return message;
-}
 
 const reasonCopy: Record<
   AuthPromptReason,
@@ -40,28 +30,28 @@ const reasonCopy: Record<
     subtitle:
       'You can browse and swipe right away as a guest. Aventi can use an anonymous Supabase session so your profile persists on this device before you make an account.',
     guestHint:
-      'PRD considerations still apply: premium entitlements are server-authoritative, and permanent login is the safer path for subscription restore and cross-device recovery.',
+      'We recommend creating a permanent account so you never lose your matches, and you can easily restore your premium access across devices.',
   },
   favorites: {
     eyebrow: 'Save Favorites',
     title: 'Save Favorites with Guest or Account',
     subtitle:
       'Guest mode can use a temporary anonymous account so hearts can persist on this device. Upgrade to a full account when you want durable recovery.',
-    guestHint: 'If anonymous auth is unavailable, Aventi will still let you browse locally as a guest.',
+    guestHint: 'Favorites require a real Supabase guest session or a full account.',
   },
   report: {
     eyebrow: 'Report Event',
     title: 'Start a Guest Session or Sign In to Report',
     subtitle:
       'Reporting is tied to authenticated users because the hide-after-3 rule depends on unique user reports. Anonymous guest auth is enough for this.',
-    guestHint: 'If you are in local guest-only mode, Aventi will ask to start a Supabase guest session first.',
+    guestHint: 'Reports require a real Supabase guest session so each reporter stays unique.',
   },
   sync: {
     eyebrow: 'Sync Your Profile',
     title: 'Upgrade Your Guest Profile',
     subtitle:
       'Aventi can bootstrap an anonymous guest profile first, then you can upgrade to an email account to keep your swipes, preferences, and favorites across devices.',
-    guestHint: 'Guest mode remains supported for local discovery and temporary persistence.',
+    guestHint: 'Guest mode uses a real anonymous Supabase session before you upgrade.',
   },
   premium: {
     eyebrow: 'Premium Entitlements',
@@ -130,22 +120,38 @@ export function AuthSheet() {
   const [password, setPassword] = useState('');
   const [errorText, setErrorText] = useState<string | null>(null);
   const [noticeText, setNoticeText] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitTask, setSubmitTask] = useState<'signin' | 'signup' | 'guest' | null>(null);
+  const opacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(opacity, {
+      toValue: auth.authPromptVisible ? 1 : 0,
+      duration: 250,
+      useNativeDriver: true,
+    }).start();
+  }, [auth.authPromptVisible, opacity]);
+
+  // Auto-close welcome screen after successful guest sign-in
+  useEffect(() => {
+    if (auth.isAnonymousUser && auth.authPromptReason === 'welcome' && auth.authPromptVisible) {
+      auth.closeAuthPrompt();
+    }
+  }, [auth.isAnonymousUser, auth.authPromptReason, auth.authPromptVisible, auth.closeAuthPrompt]);
 
   const copy = reasonCopy[auth.authPromptReason];
-  const canCloseWithoutGuest = auth.authPromptReason !== 'welcome';
+  const canCloseWithoutGuest = auth.isAuthenticated && auth.authPromptReason !== 'welcome';
   const createLabel = auth.isAnonymousUser ? 'Upgrade Guest Account' : 'Create Account';
 
   const handleGuestContinue = async () => {
     setErrorText(null);
     setNoticeText(null);
-    setIsSubmitting(true);
+    setSubmitTask('guest');
     try {
       await auth.continueAsGuest();
     } catch (error) {
       setErrorText(formatAuthError(error));
     } finally {
-      setIsSubmitting(false);
+      setSubmitTask(null);
     }
   };
 
@@ -157,7 +163,7 @@ export function AuthSheet() {
 
     setErrorText(null);
     setNoticeText(null);
-    setIsSubmitting(true);
+    setSubmitTask(formMode);
 
     try {
       if (formMode === 'signin') {
@@ -173,21 +179,19 @@ export function AuthSheet() {
     } catch (error) {
       setErrorText(formatAuthError(error));
     } finally {
-      setIsSubmitting(false);
+      setSubmitTask(null);
     }
   };
 
   return (
-    <Modal
-      visible={auth.authPromptVisible}
-      transparent
-      animationType="fade"
-      onRequestClose={canCloseWithoutGuest ? auth.closeAuthPrompt : undefined}
-      statusBarTranslucent
+    <Animated.View
+      pointerEvents={auth.authPromptVisible ? 'auto' : 'none'}
+      className="absolute bottom-0 left-0 right-0 top-0 z-50 flex-1 elevation-50"
+      style={{ opacity }}
     >
       <KeyboardAvoidingView
         behavior={Platform.select({ ios: 'padding', default: undefined })}
-        className="flex-1 justify-end bg-black/70 px-4 pb-6 pt-16"
+        className="flex-1 justify-end bg-black/90 px-4 pb-6 pt-16"
       >
         <GlassPanel>
           <View className="gap-4">
@@ -266,7 +270,7 @@ export function AuthSheet() {
               ) : null}
               {!auth.isSupabaseConfigured ? (
                 <Text className="text-xs leading-5 text-amber-200/90">
-                  Supabase auth is not configured (`EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_ANON_KEY` missing). Guest mode still works.
+                  Supabase auth is not configured (`EXPO_PUBLIC_SUPABASE_URL` / `EXPO_PUBLIC_SUPABASE_ANON_KEY` missing). Guest access is blocked until this build is configured.
                 </Text>
               ) : null}
               {auth.isSupabaseConfigured && !captchaSiteKey ? (
@@ -274,8 +278,8 @@ export function AuthSheet() {
                   If you enable Supabase Auth CAPTCHA (recommended for anonymous sign-ins), add `EXPO_PUBLIC_HCAPTCHA_SITE_KEY` and a mobile hCaptcha challenge so auth requests can send `captchaToken`.
                 </Text>
               ) : null}
-              {errorText ? (
-                <Text className="text-xs leading-5 text-rose-300/95">{errorText}</Text>
+              {errorText ?? auth.guestAuthError ? (
+                <Text className="text-xs leading-5 text-rose-300/95">{errorText ?? auth.guestAuthError}</Text>
               ) : null}
               {noticeText ? (
                 <Text className="text-xs leading-5 text-emerald-300/95">{noticeText}</Text>
@@ -290,26 +294,28 @@ export function AuthSheet() {
                 }}
                 variant="primary"
                 disabled={!auth.isSupabaseConfigured}
-                loading={isSubmitting}
+                loading={submitTask === 'signin' || submitTask === 'signup'}
               />
               <AuthButton
                 label={
                   auth.isAnonymousUser
                     ? 'Keep Temporary Guest Session'
-                    : auth.authPromptReason === 'welcome'
-                      ? 'Continue as Guest'
-                      : 'Keep Browsing as Guest'
+                    : auth.guestAuthError
+                      ? 'Retry Guest Access'
+                      : auth.authPromptReason === 'welcome'
+                        ? 'Continue as Guest'
+                        : 'Keep Browsing as Guest'
                 }
                 onPress={() => {
                   void handleGuestContinue();
                 }}
                 variant="secondary"
-                loading={isSubmitting}
+                loading={submitTask === 'guest'}
               />
             </View>
           </View>
         </GlassPanel>
       </KeyboardAvoidingView>
-    </Modal>
+    </Animated.View>
   );
 }

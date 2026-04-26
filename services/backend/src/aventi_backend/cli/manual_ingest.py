@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from aventi_backend.core.settings import get_settings
 from aventi_backend.db.session import open_db_session
 from aventi_backend.services.ingest import ManualIngestService
 from aventi_backend.services.verification import VerificationService
@@ -64,7 +65,8 @@ async def _run(args: argparse.Namespace) -> int:
                 events=events,
             )
             verification_jobs_enqueued = 0
-            if args.enqueue_verification and ingest_summary.event_ids:
+            settings = get_settings()
+            if settings.enable_verification and args.enqueue_verification and ingest_summary.event_ids:
                 verification_jobs_enqueued = await VerificationService(session).enqueue_verification_jobs(
                     limit=len(ingest_summary.event_ids),
                     event_ids=ingest_summary.event_ids,

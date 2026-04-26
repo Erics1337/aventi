@@ -20,12 +20,12 @@ dependencies = [
   "httpx>=0.28.0,<1.0.0",
   "structlog>=24.4.0,<25.0.0",
   "google-genai>=1.66.0",
+  "boto3>=1.35.0,<2.0.0",
+  "mangum>=0.17.0,<1.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8.3.0,<9.0.0",
-  "pytest-asyncio>=0.24.0,<1.0.0",
   "httpx>=0.28.0,<1.0.0",
   "ruff>=0.8.0,<1.0.0",
   "mypy>=1.13.0,<2.0.0"
@@ -35,19 +35,13 @@ dev = [
 aventi-manual-ingest = "aventi_backend.cli.manual_ingest:main"
 aventi-enqueue-market-warmups = "aventi_backend.cli.enqueue_market_warmups:main"
 
-[tool.pytest.ini_options]
-pythonpath = ["src", "services/backend/src"]
-addopts = "-q"
-markers = [
-  "integration: tests that exercise local services like Supabase",
-]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/aventi_backend"]
 
 [tool.ruff]
 line-length = 100
-src = ["src", "tests"]
+src = ["src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
@@ -56,3 +50,6 @@ select = ["E", "F", "I", "UP", "B"]
 python_version = "3.12"
 strict = false
 warn_unused_configs = true
+
+[dependency-groups]
+dev = []

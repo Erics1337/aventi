@@ -4,7 +4,7 @@
 - `apps/mobile`: Expo + NativeWind React Native client
 - `services/backend`: FastAPI API and Python worker entrypoints
 - `supabase`: Auth + Postgres + Storage (hosted)
-- `infra/aws/terraform`: AWS ECS/Fargate deployment scaffolding
+- `infra/aws/terraform`: AWS deployment config with a near-zero-cost dev baseline
 
 ## Request Flow
 1. Mobile authenticates with Supabase Auth.
@@ -19,7 +19,7 @@
 - Server: persisted vibe weight updates after swipe submit
 
 ## Deployment Targets
-- API + worker: AWS ECS/Fargate
-- ALB fronting FastAPI API
-- EventBridge schedules for recurring worker tasks
+- API + worker: AWS ECS/Fargate task definitions managed in Terraform
+- Optional ECS service for the API, disabled by default in dev
+- Optional ALB for the API, disabled by default in dev
 - Supabase remains hosted externally

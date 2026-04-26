@@ -1,10 +1,7 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Session } from '@supabase/supabase-js';
 import { createContext, startTransition, useContext, useEffect, useMemo, useState } from 'react';
 import type { PropsWithChildren } from 'react';
 import { supabase } from './supabase';
-
-const AUTH_PROMPT_DISMISSED_KEY = 'aventi.auth.prompt.dismissed.v1';
 
 export type AuthPromptReason =
   | 'welcome'
@@ -25,11 +22,10 @@ interface AuthSessionContextValue {
   isGuest: boolean;
   isAnonymousUser: boolean;
   isFullAccount: boolean;
-  isLocalGuestMode: boolean;
-  hasEnteredGuestMode: boolean;
   isSupabaseConfigured: boolean;
   email: string | null;
   session: Session | null;
+  guestAuthError: string | null;
   authPromptVisible: boolean;
   authPromptReason: AuthPromptReason;
   openAuthPrompt: (reason?: AuthPromptReason) => void;
@@ -44,6 +40,8 @@ interface AuthSessionContextValue {
 }
 
 const AuthSessionContext = createContext<AuthSessionContextValue | null>(null);
+const captchaSiteKey = process.env.EXPO_PUBLIC_HCAPTCHA_SITE_KEY;
+let reportGuestAuthFailure: ((error: unknown) => void) | null = null;
 
 function isAnonymousSession(session: Session | null): boolean {
   if (!session) return false;
@@ -53,11 +51,103 @@ function isAnonymousSession(session: Session | null): boolean {
   return provider === 'anonymous';
 }
 
-async function markAuthPromptDismissed() {
+function authErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Authentication failed';
+}
+
+export function formatAuthError(error: unknown): string {
+  const message = authErrorMessage(error);
+  if (message.toLowerCase().includes('captcha')) {
+    return captchaSiteKey
+      ? 'CAPTCHA is enabled for Supabase Auth, but this mobile build is not sending a CAPTCHA token yet. Wire the hCaptcha challenge before retrying.'
+      : 'CAPTCHA is enabled for Supabase Auth. Add EXPO_PUBLIC_HCAPTCHA_SITE_KEY and wire an hCaptcha challenge in the mobile auth flow before retrying.';
+  }
+  return message;
+}
+
+export function isInvalidRefreshTokenError(error: unknown): boolean {
+  const message = authErrorMessage(error).toLowerCase();
+  return message.includes('invalid refresh token') || (message.includes('refresh token') && message.includes('not found'));
+}
+
+async function clearLocalSupabaseSession() {
+  if (!supabase) return;
   try {
-    await AsyncStorage.setItem(AUTH_PROMPT_DISMISSED_KEY, '1');
+    await supabase.auth.signOut({ scope: 'local' });
   } catch {
-    // Ignore storage failures; auth UX still works without persistence.
+    // Ignore sign-out failures while clearing a broken local session.
+  }
+}
+
+async function signInSupabaseGuest(captchaToken?: string): Promise<Session> {
+  if (!supabase) {
+    throw new Error('Supabase auth is required in this build.');
+  }
+
+  const { data, error } = await supabase.auth.signInAnonymously({
+    options: {
+      ...(captchaToken ? { captchaToken } : {}),
+    },
+  });
+
+  if (error) {
+    throw error;
+  }
+  if (!data.session) {
+    throw new Error('Supabase guest session did not return a valid session.');
+  }
+  return data.session;
+}
+
+async function recoverSupabaseGuestSession(error: unknown): Promise<Session> {
+  await clearLocalSupabaseSession();
+  try {
+    return await signInSupabaseGuest();
+  } catch (recoveryError) {
+    reportGuestAuthFailure?.(recoveryError);
+    throw recoveryError;
+  }
+}
+
+export async function getSupabaseSessionWithRecovery(): Promise<Session | null> {
+  if (!supabase) {
+    return null;
+  }
+
+  const { data, error } = await supabase.auth.getSession();
+  if (data.session) {
+    return data.session;
+  }
+  if (!error) {
+    return null;
+  }
+  if (!isInvalidRefreshTokenError(error)) {
+    throw error;
+  }
+  return recoverSupabaseGuestSession(error);
+}
+
+export async function getSupabaseAccessTokenWithRecovery(): Promise<string | null> {
+  if (!supabase) {
+    return null;
+  }
+
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    if (data.session?.access_token) {
+      return data.session.access_token;
+    }
+    if (!error) {
+      return null;
+    }
+    if (!isInvalidRefreshTokenError(error)) {
+      throw error;
+    }
+    const recoveredSession = await recoverSupabaseGuestSession(error);
+    return recoveredSession.access_token;
+  } catch (error) {
+    reportGuestAuthFailure?.(error);
+    return null;
   }
 }
 
@@ -66,47 +156,50 @@ export function AuthSessionProvider({ children }: PropsWithChildren) {
   const [isReady, setIsReady] = useState(false);
   const [authPromptVisible, setAuthPromptVisible] = useState(false);
   const [authPromptReason, setAuthPromptReason] = useState<AuthPromptReason>('welcome');
-  const [welcomeDismissed, setWelcomeDismissed] = useState(false);
+  const [guestAuthError, setGuestAuthError] = useState<string | null>(null);
   const isSupabaseConfigured = Boolean(supabase);
 
   useEffect(() => {
     let active = true;
-
-    (async () => {
-      try {
-        const stored = await AsyncStorage.getItem(AUTH_PROMPT_DISMISSED_KEY);
-        if (active) {
-          setWelcomeDismissed(stored === '1');
-        }
-      } catch {
-        if (active) {
-          setWelcomeDismissed(false);
-        }
-      }
-    })();
-
-    return () => {
-      active = false;
+    reportGuestAuthFailure = (error) => {
+      if (!active) return;
+      startTransition(() => {
+        setSession(null);
+        setGuestAuthError(formatAuthError(error));
+        setAuthPromptReason('welcome');
+        setAuthPromptVisible(true);
+        setIsReady(true);
+      });
     };
-  }, []);
-
-  useEffect(() => {
-    let active = true;
 
     if (!supabase) {
+      setGuestAuthError('Supabase auth is required in this build.');
       setIsReady(true);
       return () => {
         active = false;
+        reportGuestAuthFailure = null;
       };
     }
 
     void (async () => {
-      const { data } = await supabase.auth.getSession();
-      if (!active) return;
-      startTransition(() => {
-        setSession(data.session ?? null);
-        setIsReady(true);
-      });
+      try {
+        const nextSession = await getSupabaseSessionWithRecovery();
+        if (!active) return;
+        startTransition(() => {
+          setSession(nextSession);
+          setGuestAuthError(null);
+          setIsReady(true);
+        });
+      } catch (error) {
+        if (!active) return;
+        startTransition(() => {
+          setSession(null);
+          setGuestAuthError(formatAuthError(error));
+          setAuthPromptReason('welcome');
+          setAuthPromptVisible(true);
+          setIsReady(true);
+        });
+      }
     })();
 
     const {
@@ -114,28 +207,26 @@ export function AuthSessionProvider({ children }: PropsWithChildren) {
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       startTransition(() => {
         setSession(nextSession ?? null);
+        if (nextSession) {
+          setGuestAuthError(null);
+          setAuthPromptVisible(false);
+        }
         setIsReady(true);
       });
     });
 
     return () => {
       active = false;
+      reportGuestAuthFailure = null;
       subscription.unsubscribe();
     };
   }, []);
 
   useEffect(() => {
-    if (!isReady || session || welcomeDismissed) return;
+    if (!isReady || session || authPromptVisible) return;
     setAuthPromptReason('welcome');
     setAuthPromptVisible(true);
-  }, [isReady, session, welcomeDismissed]);
-
-  useEffect(() => {
-    if (!session) return;
-    setAuthPromptVisible(false);
-    setWelcomeDismissed(true);
-    void markAuthPromptDismissed();
-  }, [session]);
+  }, [authPromptVisible, isReady, session]);
 
   const value = useMemo<AuthSessionContextValue>(() => {
     const openAuthPrompt = (reason: AuthPromptReason = 'sync') => {
@@ -144,28 +235,26 @@ export function AuthSessionProvider({ children }: PropsWithChildren) {
     };
 
     const closeAuthPrompt = () => {
+      if (!session) {
+        return;
+      }
       setAuthPromptVisible(false);
     };
 
     const continueAsGuest = async (captchaToken?: string) => {
-      setWelcomeDismissed(true);
-      await markAuthPromptDismissed();
-      setAuthPromptVisible(false);
-      if (!supabase || session) {
+      setGuestAuthError(null);
+      if (session) {
+        setAuthPromptVisible(false);
         return;
       }
-      const { error } = await supabase.auth.signInAnonymously({
-        options: {
-          ...(captchaToken ? { captchaToken } : {}),
-        },
-      });
-      if (error) {
-        // Only fall back when anonymous auth is unavailable/unreachable, not when CAPTCHA is required.
-        const message = `${error.message ?? ''}`.toLowerCase();
-        if (message.includes('captcha')) {
-          throw error;
-        }
-        return;
+      try {
+        await signInSupabaseGuest(captchaToken);
+        setGuestAuthError(null);
+        setAuthPromptVisible(false);
+      } catch (error) {
+        setGuestAuthError(formatAuthError(error));
+        setAuthPromptVisible(true);
+        throw error;
       }
     };
 
@@ -205,8 +294,7 @@ export function AuthSessionProvider({ children }: PropsWithChildren) {
       if (error) {
         throw error;
       }
-      setWelcomeDismissed(true);
-      await markAuthPromptDismissed();
+      setGuestAuthError(null);
       setAuthPromptVisible(false);
     };
 
@@ -223,8 +311,7 @@ export function AuthSessionProvider({ children }: PropsWithChildren) {
         if (error) {
           throw error;
         }
-        setWelcomeDismissed(true);
-        await markAuthPromptDismissed();
+        setGuestAuthError(null);
         setAuthPromptVisible(false);
         return { emailConfirmationRequired: false };
       }
@@ -240,8 +327,7 @@ export function AuthSessionProvider({ children }: PropsWithChildren) {
       }
       const emailConfirmationRequired = !data.session;
       if (!emailConfirmationRequired) {
-        setWelcomeDismissed(true);
-        await markAuthPromptDismissed();
+        setGuestAuthError(null);
         setAuthPromptVisible(false);
       }
       return { emailConfirmationRequired };
@@ -254,8 +340,9 @@ export function AuthSessionProvider({ children }: PropsWithChildren) {
         throw error;
       }
       setSession(null);
-      setAuthPromptReason('sync');
-      setAuthPromptVisible(false);
+      setGuestAuthError(null);
+      setAuthPromptReason('welcome');
+      setAuthPromptVisible(true);
     };
 
     const anonymous = isAnonymousSession(session);
@@ -263,14 +350,13 @@ export function AuthSessionProvider({ children }: PropsWithChildren) {
     return {
       isReady,
       isAuthenticated: Boolean(session),
-      isGuest: !session || anonymous,
+      isGuest: anonymous,
       isAnonymousUser: anonymous,
       isFullAccount: Boolean(session) && !anonymous,
-      isLocalGuestMode: !session && welcomeDismissed,
-      hasEnteredGuestMode: welcomeDismissed,
       isSupabaseConfigured,
       email: session?.user.email ?? null,
       session,
+      guestAuthError,
       authPromptVisible,
       authPromptReason,
       openAuthPrompt,
@@ -283,7 +369,7 @@ export function AuthSessionProvider({ children }: PropsWithChildren) {
       signUpWithPassword,
       signOut,
     };
-  }, [authPromptReason, authPromptVisible, isReady, isSupabaseConfigured, session, welcomeDismissed]);
+  }, [authPromptReason, authPromptVisible, guestAuthError, isReady, isSupabaseConfigured, session]);
 
   return <AuthSessionContext.Provider value={value}>{children}</AuthSessionContext.Provider>;
 }

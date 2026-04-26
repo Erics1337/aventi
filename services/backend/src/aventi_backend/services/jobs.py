@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
+import boto3
+from botocore.exceptions import EndpointConnectionError
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+import uuid
+
+from aventi_backend.core.settings import get_settings
 
 
 class JobType(StrEnum):
@@ -42,200 +49,55 @@ class JobQueueRepository:
         run_at: datetime | None = None,
         max_attempts: int = 5,
     ) -> JobRecord:
-        result = await self.session.execute(
-            text(
-                """
-                insert into public.job_queue (
-                    job_type,
-                    payload,
-                    status,
-                    attempts,
-                    max_attempts,
-                    run_at,
-                    created_at,
-                    updated_at
+        settings = get_settings()
+
+        if not settings.sqs_worker_queue_url:
+            raise RuntimeError("SQS_WORKER_QUEUE_URL must be configured to enqueue jobs.")
+
+        job_id = f"job-{uuid.uuid4()}"
+        client_kwargs = {}
+        if settings.aws_endpoint_url:
+            client_kwargs["endpoint_url"] = settings.aws_endpoint_url
+        sqs_client = boto3.client("sqs", **client_kwargs)
+        message_body = {
+            "format": "v1",
+            "job_id": job_id,
+            "job_type": str(job_type),
+            "payload": payload or {},
+            "attempts": 0,
+            "max_attempts": max_attempts,
+        }
+        if run_at:
+            delay_seconds = int(max(0, (run_at - datetime.now(tz=UTC)).total_seconds()))
+            if delay_seconds > 900:
+                logging.getLogger(__name__).warning(
+                    f"Requested delay {delay_seconds}s exceeds SQS max of 900s. "
+                    f"run_at={run_at.isoformat()}, capping to 15 minutes."
                 )
-                values (
-                    :job_type,
-                    cast(:payload_json as jsonb),
-                    'queued',
-                    0,
-                    :max_attempts,
-                    coalesce(:run_at, now()),
-                    now(),
-                    now()
-                )
-                returning id::text as id, job_type, payload, run_at, attempts, max_attempts
-                """
-            ),
-            {
-                "job_type": str(job_type),
-                "payload_json": json.dumps(payload or {}),
-                "max_attempts": max_attempts,
-                "run_at": run_at,
-            },
-        )
-        row = result.mappings().one()
-        await self.session.commit()
-        return JobRecord(
-            id=str(row["id"]),
-            type=JobType(str(row["job_type"])),
-            payload=dict(row["payload"] or {}),
-            run_at=row["run_at"],
-            attempts=int(row["attempts"]),
-            max_attempts=int(row["max_attempts"]),
-        )
-
-    async def claim_due_jobs(self, worker_name: str, limit: int = 5) -> list[JobRecord]:
-        result = await self.session.execute(
-            text(
-                """
-                with due as (
-                    select jq.id
-                    from public.job_queue jq
-                    where jq.status = 'queued'
-                      and jq.run_at <= now()
-                    order by jq.run_at asc, jq.created_at asc
-                    for update skip locked
-                    limit :limit_rows
-                ), claimed as (
-                    update public.job_queue jq
-                    set status = 'running',
-                        locked_at = now(),
-                        locked_by = :worker_name,
-                        attempts = jq.attempts + 1,
-                        updated_at = now()
-                    from due
-                    where jq.id = due.id
-                    returning jq.id::text as id, jq.job_type, jq.payload, jq.run_at, jq.attempts, jq.max_attempts, jq.locked_by
-                )
-                select * from claimed
-                order by run_at asc
-                """
-            ),
-            {"worker_name": worker_name, "limit_rows": limit},
-        )
-        rows = result.mappings().all()
-
-        claimed_jobs: list[JobRecord] = []
-        for row in rows:
-            run_result = await self.session.execute(
-                text(
-                    """
-                    insert into public.job_runs (job_id, status, worker_name, started_at)
-                    values (:job_id, 'running', :worker_name, now())
-                    returning id::text as id
-                    """
-                ),
-                {"job_id": row["id"], "worker_name": worker_name},
-            )
-            run_row = run_result.mappings().one()
-            claimed_jobs.append(
-                JobRecord(
-                    id=str(row["id"]),
-                    type=JobType(str(row["job_type"])),
-                    payload=dict(row["payload"] or {}),
-                    run_at=row["run_at"],
-                    attempts=int(row["attempts"]),
-                    max_attempts=int(row["max_attempts"]),
-                    run_id=str(run_row["id"]),
-                    locked_by=str(row["locked_by"] or worker_name),
-                )
-            )
-
-        await self.session.commit()
-        return claimed_jobs
-
-    async def mark_complete(self, job_id: str, *, run_id: str | None = None) -> None:
-        await self.session.execute(
-            text(
-                """
-                update public.job_queue
-                set status = 'done',
-                    locked_at = null,
-                    locked_by = null,
-                    last_error = null,
-                    updated_at = now()
-                where id = :job_id
-                """
-            ),
-            {"job_id": job_id},
-        )
-        if run_id:
-            await self.session.execute(
-                text(
-                    """
-                    update public.job_runs
-                    set status = 'completed',
-                        finished_at = now()
-                    where id = :run_id
-                    """
-                ),
-                {"run_id": run_id},
-            )
-        await self.session.commit()
-
-    async def mark_failed(self, job_id: str, error: str, *, run_id: str | None = None) -> None:
-        result = await self.session.execute(
-            text(
-                """
-                update public.job_queue
-                set status = case when attempts >= max_attempts then 'failed' else 'queued' end,
-                    run_at = case
-                        when attempts >= max_attempts then run_at
-                        else now() + make_interval(secs => least(300, greatest(10, attempts * 15)))
-                    end,
-                    locked_at = null,
-                    locked_by = null,
-                    last_error = :error,
-                    updated_at = now()
-                where id = :job_id
-                returning status
-                """
-            ),
-            {"job_id": job_id, "error": error[:2000]},
-        )
-        row = result.first()
-        run_status = "failed" if (row and row[0] == "failed") else "retrying"
-        if run_id:
-            await self.session.execute(
-                text(
-                    """
-                    update public.job_runs
-                    set status = :status,
-                        error_message = :error,
-                        finished_at = now()
-                    where id = :run_id
-                    """
-                ),
-                {"run_id": run_id, "status": run_status, "error": error[:2000]},
-            )
-        await self.session.commit()
-
-    async def list_jobs(self, *, statuses: list[str] | None = None, limit: int = 50) -> list[dict[str, Any]]:
-        if statuses:
-            query = text(
-                """
-                select id::text as id, job_type, status, attempts, max_attempts, run_at, locked_by, last_error
-                from public.job_queue
-                where status = any(:statuses)
-                order by created_at desc
-                limit :limit_rows
-                """
-            )
-            params = {"statuses": statuses, "limit_rows": limit}
+            delay_seconds = min(delay_seconds, 900)  # SQS max delay is 15 minutes
         else:
-            query = text(
-                """
-                select id::text as id, job_type, status, attempts, max_attempts, run_at, locked_by, last_error
-                from public.job_queue
-                order by created_at desc
-                limit :limit_rows
-                """
+            delay_seconds = 0
+
+        try:
+            await asyncio.to_thread(
+                sqs_client.send_message,
+                QueueUrl=settings.sqs_worker_queue_url,
+                MessageBody=json.dumps(message_body),
+                DelaySeconds=delay_seconds,
             )
-            params = {"limit_rows": limit}
-        result = await self.session.execute(query, params)
-        return [dict(row) for row in result.mappings().all()]
+        except EndpointConnectionError as exc:
+            raise RuntimeError(
+                f"SQS endpoint unreachable ({settings.aws_endpoint_url}). "
+                "Start your LocalStack Docker container and try again."
+            ) from exc
+        return JobRecord(
+            id=job_id,
+            type=job_type,
+            payload=payload or {},
+            run_at=run_at or datetime.now(tz=UTC),
+            attempts=0,
+            max_attempts=max_attempts,
+        )
 
 
 def build_manual_job(job_type: JobType, payload: dict[str, Any]) -> JobRecord:

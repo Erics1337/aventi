@@ -10,6 +10,8 @@ from uuid import uuid5, NAMESPACE_URL
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from aventi_backend.services.event_images import infer_image_source, should_generate_main_image
+
 
 @dataclass(slots=True)
 class ManualIngestSummary:
@@ -42,7 +44,14 @@ class ManualIngestService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def ingest_manual(self, source_name: str, city: str, events: list[dict[str, Any]]) -> ManualIngestSummary:
+    async def ingest_manual(
+        self,
+        source_name: str,
+        city: str,
+        events: list[dict[str, Any]],
+        *,
+        scan_meta: dict[str, Any] | None = None,
+    ) -> ManualIngestSummary:
         if not events:
             raise ValueError("Manual ingest requires at least one event payload")
 
@@ -52,15 +61,58 @@ class ManualIngestService:
         inserted_events = 0
         updated_events = 0
         inserted_occurrences = 0
+        near_duplicates_skipped = 0
+        image_jobs_enqueued = 0
+        image_job_event_ids: set[str] = set()
         event_ids: list[str] = []
         try:
             for raw_event in events:
                 normalized = self._normalize_event_payload(raw_event, default_city=city)
                 row_counts = await self._upsert_event_bundle(normalized)
-                inserted_events += row_counts["inserted_event"]
+
+                event_id = row_counts["event_id"]
+                inserted_event = row_counts["inserted_event"]
+
+                inserted_events += inserted_event
                 updated_events += row_counts["updated_event"]
                 inserted_occurrences += row_counts["inserted_occurrence"]
-                event_ids.append(row_counts["event_id"])
+                near_duplicates_skipped += row_counts.get("near_duplicate", 0)
+                event_ids.append(event_id)
+
+                event_state = await self._fetch_event_image_state(event_id)
+                metadata = event_state.get("metadata") if isinstance(event_state, dict) else {}
+                incoming_source_type = None
+                if isinstance(normalized.get("metadata"), dict):
+                    incoming_source_type = normalized["metadata"].get("sourceType")
+
+                should_generate_image = should_generate_main_image(
+                    event_state.get("image_url"),
+                    metadata if isinstance(metadata, dict) else None,
+                    incoming_source_type=incoming_source_type,
+                )
+
+                if should_generate_image and event_id not in image_job_event_ids:
+                    from aventi_backend.services.jobs import JobQueueRepository, JobType
+                    await JobQueueRepository(self.session).enqueue_job(
+                        JobType.GENERATE_IMAGE,
+                        {"eventId": event_id}
+                    )
+                    image_jobs_enqueued += 1
+                    image_job_event_ids.add(event_id)
+
+            # Merge caller-provided scan_meta (e.g. SerpAPI pagination telemetry)
+            # with our own ingest-side counters before persisting.
+            final_metadata: dict[str, Any] = {
+                "updatedEvents": updated_events,
+                "insertedOccurrences": inserted_occurrences,
+                "nearDuplicatesSkipped": near_duplicates_skipped,
+                "imageJobsEnqueued": image_jobs_enqueued,
+                "eventIds": event_ids,
+            }
+            if scan_meta:
+                # scan_meta keys take precedence so callers can override counters.
+                for key, value in scan_meta.items():
+                    final_metadata[key] = value
 
             await self.session.execute(
                 text(
@@ -81,13 +133,7 @@ class ManualIngestService:
                     "inserted_count": inserted_events,
                     "updated_events": updated_events,
                     "inserted_occurrences": inserted_occurrences,
-                    "metadata_json": json.dumps(
-                        {
-                            "updatedEvents": updated_events,
-                            "insertedOccurrences": inserted_occurrences,
-                            "eventIds": event_ids,
-                        }
-                    ),
+                    "metadata_json": json.dumps(final_metadata),
                 },
             )
             await self.session.commit()
@@ -183,17 +229,163 @@ class ManualIngestService:
         return dict(row)
 
     async def _upsert_event_bundle(self, event: dict[str, Any]) -> dict[str, Any]:
+        event = self._attach_image_metadata(event)
         venue = await self._upsert_venue(event)
-        event_row = await self._upsert_event(event, venue_id=venue["id"])
+
+        # Fuzzy dedup: if an existing event already lives at the same venue on
+        # the same calendar day with a highly-similar title, treat this ingest
+        # as an update of that row rather than inserting a parallel duplicate.
+        # This catches SerpAPI returning the same concert via two URLs
+        # (e.g. Ticketmaster + venue page).
+        fuzzy_match = await self._find_fuzzy_duplicate(
+            venue_id=venue["id"],
+            title=str(event["title"]),
+            starts_at=event["startsAt"],
+            incoming_booking_url=str(event["bookingUrl"]),
+        )
+        near_duplicate = 0
+        if fuzzy_match is not None:
+            event_row = await self._merge_into_existing(fuzzy_match, event)
+            near_duplicate = 1
+        else:
+            event_row = await self._upsert_event(event, venue_id=venue["id"])
         occurrence_row = await self._upsert_occurrence(event_row["id"], event)
         await self._upsert_tags(event_row["id"], event)
+        await self._upsert_ticket_offers(event_row["id"], event)
+
+        # Insert extra occurrences for recurring events
+        extra_inserted = 0
+        for extra in (event.get("extraOccurrences") or []):
+            if not isinstance(extra, dict):
+                continue
+            extra_starts_at = self._coerce_datetime(extra.get("startsAt"))
+            extra_ends_at = self._coerce_datetime(extra.get("endsAt"))
+            if extra_starts_at is None:
+                continue
+            extra_row = await self._upsert_occurrence(
+                event_row["id"],
+                {
+                    "startsAt": extra_starts_at,
+                    "endsAt": extra_ends_at,
+                    "timezone": extra.get("timezone") or event.get("timezone") or "UTC",
+                },
+            )
+            extra_inserted += 1 if extra_row["inserted"] else 0
 
         return {
             "event_id": event_row["id"],
             "inserted_event": 1 if event_row["inserted"] else 0,
             "updated_event": 0 if event_row["inserted"] else 1,
-            "inserted_occurrence": 1 if occurrence_row["inserted"] else 0,
+            "inserted_occurrence": (1 if occurrence_row["inserted"] else 0) + extra_inserted,
+            "near_duplicate": near_duplicate,
         }
+
+    async def _fetch_event_image_state(self, event_id: str) -> dict[str, Any]:
+        result = await self.session.execute(
+            text(
+                """
+                select image_url, metadata
+                from public.events
+                where id = :id
+                """
+            ),
+            {"id": event_id},
+        )
+        row = result.mappings().first()
+        return dict(row) if row else {"image_url": None, "metadata": {}}
+
+    @staticmethod
+    def _attach_image_metadata(event: dict[str, Any]) -> dict[str, Any]:
+        metadata = dict(event.get("metadata") or {})
+        image_source = infer_image_source(
+            event.get("imageUrl"),
+            str(metadata.get("sourceType")) if metadata.get("sourceType") else None,
+        )
+        if image_source:
+            metadata["imageSource"] = image_source
+        return {**event, "metadata": metadata}
+
+    async def _find_fuzzy_duplicate(
+        self,
+        *,
+        venue_id: str,
+        title: str,
+        starts_at: Any,
+        incoming_booking_url: str,
+    ) -> dict[str, Any] | None:
+        """Return an existing event at the same venue+day with similar title.
+
+        Uses pg_trgm `similarity()` (>=0.85) on the generated ``normalized_title``
+        column, and joins event_occurrences to pick rows whose starts_at falls
+        on the same calendar day as the incoming candidate. Skips if the
+        incoming booking_url matches — the booking_url unique constraint
+        handles the exact case already.
+        """
+        if starts_at is None:
+            return None
+        result = await self.session.execute(
+            text(
+                """
+                select e.id::text as id, e.title, e.booking_url, e.image_url, e.description
+                from public.events e
+                join public.event_occurrences eo on eo.event_id = e.id
+                where e.venue_id = :venue_id
+                  and e.booking_url <> :incoming_url
+                  and e.hidden = false
+                  and similarity(e.normalized_title, lower(regexp_replace(:incoming_title, '\\s+', ' ', 'g'))) >= 0.85
+                  and date_trunc('day', eo.starts_at) = date_trunc('day', cast(:starts_at as timestamptz))
+                order by similarity(e.normalized_title, lower(:incoming_title)) desc
+                limit 1
+                """
+            ),
+            {
+                "venue_id": venue_id,
+                "incoming_url": incoming_booking_url,
+                "incoming_title": title,
+                "starts_at": starts_at,
+            },
+        )
+        row = result.mappings().first()
+        return dict(row) if row else None
+
+    async def _merge_into_existing(
+        self,
+        existing: dict[str, Any],
+        event: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Merge incoming candidate into an existing event row without rewriting booking_url."""
+        await self.session.execute(
+            text(
+                """
+                update public.events
+                set description = coalesce(public.events.description, :description),
+                    image_url = case
+                        when public.events.metadata->>'imageSource' = 'supabase_storage'
+                            then public.events.image_url
+                        else coalesce(:image_url, public.events.image_url)
+                    end,
+                    price_label = coalesce(public.events.price_label, :price_label),
+                    is_free = case when :is_free then true else public.events.is_free end,
+                    metadata = case
+                        when public.events.metadata->>'imageSource' = 'supabase_storage'
+                            then public.events.metadata || (cast(:metadata_json as jsonb) - 'imageSource' - 'imageUpdatedAt')
+                        else public.events.metadata || cast(:metadata_json as jsonb)
+                    end,
+                    updated_at = now()
+                where id = :id
+                returning id::text as id
+                """
+            ),
+            {
+                "id": existing["id"],
+                "description": event.get("description"),
+                "image_url": event.get("imageUrl"),
+                "price_label": event.get("priceLabel"),
+                "is_free": bool(event.get("isFree", False)),
+                "metadata_json": json.dumps(event.get("metadata") or {}),
+            },
+        )
+        return {"id": existing["id"], "inserted": False}
 
     async def _upsert_venue(self, event: dict[str, Any]) -> dict[str, Any]:
         venue_name = str(event["venueName"]).strip()
@@ -205,10 +397,10 @@ class ManualIngestService:
             text(
                 """
                 insert into public.venues (
-                    name, slug, city, state, country, address, latitude, longitude, booking_domain, metadata, created_at, updated_at
+                    name, slug, city, state, country, address, latitude, longitude, rating, review_count, booking_domain, metadata, created_at, updated_at
                 )
                 values (
-                    :name, :slug, :city, :state, :country, :address, :latitude, :longitude, :booking_domain, cast(:metadata_json as jsonb), now(), now()
+                    :name, :slug, :city, :state, :country, :address, :latitude, :longitude, :rating, :review_count, :booking_domain, cast(:metadata_json as jsonb), now(), now()
                 )
                 on conflict (slug) do update
                 set name = excluded.name,
@@ -218,6 +410,8 @@ class ManualIngestService:
                     address = coalesce(excluded.address, public.venues.address),
                     latitude = coalesce(excluded.latitude, public.venues.latitude),
                     longitude = coalesce(excluded.longitude, public.venues.longitude),
+                    rating = coalesce(excluded.rating, public.venues.rating),
+                    review_count = coalesce(excluded.review_count, public.venues.review_count),
                     booking_domain = coalesce(excluded.booking_domain, public.venues.booking_domain),
                     metadata = public.venues.metadata || excluded.metadata,
                     updated_at = now()
@@ -233,6 +427,8 @@ class ManualIngestService:
                 "address": event.get("venueAddress"),
                 "latitude": event.get("venueLatitude"),
                 "longitude": event.get("venueLongitude"),
+                "rating": event.get("venueRating"),
+                "review_count": event.get("venueReviewCount"),
                 "booking_domain": self._booking_domain(event["bookingUrl"]),
                 "metadata_json": json.dumps(event.get("venueMetadata") or {}),
             },
@@ -294,13 +490,21 @@ class ManualIngestService:
                     title = excluded.title,
                     description = coalesce(excluded.description, public.events.description),
                     category = excluded.category,
-                    image_url = coalesce(excluded.image_url, public.events.image_url),
+                    image_url = case
+                        when public.events.metadata->>'imageSource' = 'supabase_storage'
+                            then public.events.image_url
+                        else coalesce(excluded.image_url, public.events.image_url)
+                    end,
                     price_label = coalesce(excluded.price_label, public.events.price_label),
                     is_free = excluded.is_free,
                     dress_code = coalesce(excluded.dress_code, public.events.dress_code),
                     crowd_age = coalesce(excluded.crowd_age, public.events.crowd_age),
                     music_genre = coalesce(excluded.music_genre, public.events.music_genre),
-                    metadata = public.events.metadata || excluded.metadata,
+                    metadata = case
+                        when public.events.metadata->>'imageSource' = 'supabase_storage'
+                            then public.events.metadata || (excluded.metadata - 'imageSource' - 'imageUpdatedAt')
+                        else public.events.metadata || excluded.metadata
+                    end,
                     updated_at = now()
                 returning id::text as id, (xmax = 0) as inserted
                 """
@@ -357,6 +561,39 @@ class ManualIngestService:
         )
         row = result.mappings().one()
         return dict(row)
+
+    async def _upsert_ticket_offers(self, event_id: str, event: dict[str, Any]) -> None:
+        offers = event.get("ticketOffers") or []
+        for sort_order, offer in enumerate(offers):
+            if not isinstance(offer, dict):
+                continue
+            url = offer.get("url")
+            if not url:
+                continue
+            await self.session.execute(
+                text(
+                    """
+                    insert into public.ticket_offers (
+                        event_id, provider, url, price_label, is_free, sort_order, created_at, updated_at
+                    )
+                    values (:event_id, :provider, :url, :price_label, :is_free, :sort_order, now(), now())
+                    on conflict (event_id, url) do update
+                    set provider = coalesce(excluded.provider, public.ticket_offers.provider),
+                        price_label = coalesce(excluded.price_label, public.ticket_offers.price_label),
+                        is_free = coalesce(excluded.is_free, public.ticket_offers.is_free),
+                        sort_order = excluded.sort_order,
+                        updated_at = now()
+                    """
+                ),
+                {
+                    "event_id": event_id,
+                    "provider": offer.get("provider"),
+                    "url": url,
+                    "price_label": offer.get("priceLabel"),
+                    "is_free": offer.get("isFree"),
+                    "sort_order": sort_order,
+                },
+            )
 
     async def _upsert_tags(self, event_id: str, event: dict[str, Any]) -> None:
         vibes = [str(v).strip() for v in (event.get("vibes") or []) if str(v).strip()]
@@ -430,6 +667,10 @@ class ManualIngestService:
             "tags": self._coerce_list(self._pick(raw, "tags", default=[])),
             "metadata": raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {},
             "venueMetadata": venue_obj.get("metadata") if isinstance(venue_obj.get("metadata"), dict) else {},
+            "venueRating": self._coerce_float(self._pick(raw, "venueRating", "venue_rating", default=None)),
+            "venueReviewCount": self._pick(raw, "venueReviewCount", "venue_review_count", default=None),
+            "ticketOffers": raw.get("ticketOffers") or [],
+            "extraOccurrences": raw.get("extraOccurrences") or [],
         }
 
     @staticmethod
