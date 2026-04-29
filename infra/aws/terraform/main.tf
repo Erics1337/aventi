@@ -128,7 +128,7 @@ resource "aws_lambda_function" "worker" {
   timeout       = 900
   memory_size   = tonumber(var.worker_memory)
 
-  # Cap concurrent CITY_SCAN workers to protect the SerpAPI credit budget
+  # Cap concurrent MARKET_SCAN workers to protect the SerpAPI credit budget
   # and avoid DB contention. Tunable via var.worker_reserved_concurrency.
   reserved_concurrent_executions = var.worker_reserved_concurrency
 
@@ -254,8 +254,8 @@ resource "aws_secretsmanager_secret" "runtime" {
 }
 
 ############################################################
-# Weekly city-scan scheduler (EventBridge -> scheduler Lambda
-# -> SQS -> worker Lambda). Fans out one CITY_SCAN job per
+# Weekly market-scan scheduler (EventBridge -> scheduler Lambda
+# -> SQS -> worker Lambda). Fans out one MARKET_SCAN job per
 # (active market x scan window). Reuses the worker container
 # image with an overridden handler.
 ############################################################
@@ -299,20 +299,20 @@ resource "aws_lambda_function" "scheduler" {
   tags = local.common_tags
 }
 
-resource "aws_cloudwatch_event_rule" "weekly_city_scan" {
-  name                = "${local.name_prefix}-weekly-city-scan"
-  description         = "Trigger weekly heat-aware city scan fan-out"
-  schedule_expression = var.city_scan_cron_expression
+resource "aws_cloudwatch_event_rule" "weekly_market_scan" {
+  name                = "${local.name_prefix}-weekly-market-scan"
+  description         = "Trigger weekly heat-aware market scan fan-out"
+  schedule_expression = var.market_scan_cron_expression
   tags                = local.common_tags
 }
 
-resource "aws_cloudwatch_event_target" "weekly_city_scan" {
-  rule      = aws_cloudwatch_event_rule.weekly_city_scan.name
+resource "aws_cloudwatch_event_target" "weekly_market_scan" {
+  rule      = aws_cloudwatch_event_rule.weekly_market_scan.name
   target_id = "scheduler-lambda"
   arn       = aws_lambda_function.scheduler.arn
 
   input = jsonencode({
-    limit = var.city_scan_max_markets
+    limit = var.market_scan_max_markets
   })
 }
 
@@ -321,5 +321,5 @@ resource "aws_lambda_permission" "allow_eventbridge_scheduler" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.scheduler.function_name
   principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.weekly_city_scan.arn
+  source_arn    = aws_cloudwatch_event_rule.weekly_market_scan.arn
 }

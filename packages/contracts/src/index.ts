@@ -137,6 +137,71 @@ export interface MembershipEntitlements {
   validUntil?: string | null;
 }
 
+export type AdminMarketHeatTier = 'hot' | 'warm' | 'cold';
+
+export interface AdminMarketSummary {
+  marketKey: string;
+  city: string;
+  state?: string | null;
+  country: string;
+  heatTier: AdminMarketHeatTier;
+  visibleEventCount7d: number;
+  activeUserCount7d: number;
+  activeUserCount14d: number;
+  lastRequestedAt?: string | null;
+  lastScanRequestedAt?: string | null;
+  lastScanStartedAt?: string | null;
+  lastScanCompletedAt?: string | null;
+  lastScanSucceededAt?: string | null;
+  scanLockUntil?: string | null;
+  lastTargetedRequestedAt?: string | null;
+  lastTargetedCompletedAt?: string | null;
+  lastTargetedFilterSignature?: string | null;
+  lastError?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface AdminIngestRunSummary {
+  id: string;
+  city?: string | null;
+  status: string;
+  sourceName?: string | null;
+  sourceType?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  discoveredCount: number;
+  insertedCount: number;
+  errorMessage?: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface AdminVerificationSummary {
+  status: string;
+  active?: boolean | null;
+  count: number;
+  latestVerifiedAt?: string | null;
+}
+
+export interface AdminDashboardResponse {
+  rollup: {
+    marketsTotal: number;
+    hotMarkets: number;
+    activeScans: number;
+    visibleEvents7d: number;
+    runningIngests: number;
+    failedIngests: number;
+    verificationBacklog: number;
+  };
+  markets: AdminMarketSummary[];
+  ingestRuns: AdminIngestRunSummary[];
+  verification: AdminVerificationSummary[];
+  workerQueue: {
+    configured: boolean;
+    pollSeconds: number;
+    endpointUrl?: string | null;
+  };
+}
+
 export const RANKING_CONSTANTS = {
   BASELINE_WEIGHT: 1.0,
   LIKE_MULTIPLIER: 1.1,

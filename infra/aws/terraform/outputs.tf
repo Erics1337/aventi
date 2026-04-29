@@ -25,10 +25,15 @@ output "runtime_secret_name" {
 
 output "scheduler_lambda_arn" {
   value       = aws_lambda_function.scheduler.arn
-  description = "Weekly city-scan scheduler Lambda ARN"
+  description = "Weekly market-scan scheduler Lambda ARN"
+}
+
+output "weekly_market_scan_rule_name" {
+  value       = aws_cloudwatch_event_rule.weekly_market_scan.name
+  description = "EventBridge rule driving the weekly market scan"
 }
 
 output "weekly_city_scan_rule_name" {
-  value       = aws_cloudwatch_event_rule.weekly_city_scan.name
-  description = "EventBridge rule driving the weekly city scan"
+  value       = aws_cloudwatch_event_rule.weekly_market_scan.name
+  description = "Deprecated: renamed to weekly_market_scan_rule_name"
 }

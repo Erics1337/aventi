@@ -23,7 +23,11 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.aventi.app"
+      "bundleIdentifier": "com.aventi.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.aventi.app",

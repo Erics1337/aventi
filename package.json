@@ -13,8 +13,7 @@
     "backend:sync": "cd services/backend && uv sync --extra dev",
     "backend:dev": "cd services/backend && uv run python -m aventi_backend.main",
     "backend:worker": "cd services/backend && uv run python -m aventi_backend.worker.main",
-    "backend:test": "cd services/backend && uv run pytest",
-    "backend:ingest": "cd services/backend && uv run aventi-manual-ingest"
+    "backend:test": "cd services/backend && uv run pytest"
   },
   "devDependencies": {
     "turbo": "^2.0.14"

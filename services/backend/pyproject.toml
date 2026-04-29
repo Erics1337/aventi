@@ -32,7 +32,6 @@ dev = [
 ]
 
 [project.scripts]
-aventi-manual-ingest = "aventi_backend.cli.manual_ingest:main"
 aventi-enqueue-market-warmups = "aventi_backend.cli.enqueue_market_warmups:main"
 
 

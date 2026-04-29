@@ -70,7 +70,7 @@ async def mark_market_seen(
 
     If the market is not yet tracked, bootstraps a ``market_inventory_state``
     row with ``heat_tier='warm'`` and immediately enqueues a single short-term
-    CITY_SCAN job. Idempotent on repeat calls: just bumps
+    MARKET_SCAN job. Idempotent on repeat calls: just bumps
     ``last_user_active_at``.
     """
     market = build_market_descriptor(

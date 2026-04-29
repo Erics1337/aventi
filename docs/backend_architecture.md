@@ -34,7 +34,7 @@ Scraping the web and asking AI models to analyze text takes time. We can't do th
 1.  **The Queue (`services/jobs.py`)**: Jobs (like "Scan Austin for events") are pushed to an **AWS SQS Queue** using Boto3. In production, the queue is provisioned by Terraform before the worker starts. In local development with LocalStack, the worker auto-creates the queue on startup if it doesn't exist.
 2.  **The Worker (`worker/lambda_handler.py`)**: An **AWS Lambda Serverless Function** automatically spins up instances to pull new items directly from the SQS queue and execute the business logic.
 3.  **The Handlers (`worker/handlers.py`)**: When the worker claims a job, it routes it to a specific function based on its type:
-    - `CITY_SCAN`: Triggers the AI to search the web for events.
+    - `MARKET_SCAN`: Triggers the scraper to search the web for events.
     - `ENRICH_EVENT`: Asks the AI to extract tags, vibes, and dress codes from a long event description.
     - `VERIFY_EVENT`: Checks if a booking URL is still active.
     - `GENERATE_IMAGE`: Creates an event poster using AI image generation.
@@ -52,7 +52,7 @@ This is the brain of the event discovery platform, heavily relying on Google's G
 
 1. A user opens the app in "Austin" and hits `GET /v1/feed`.
 2. The `AventiRepository` queries Postgres. It realizes there are zero events for Austin.
-3. The API immediately responds to the user (perhaps showing a loading state or a fallback) AND fires three new `CITY_SCAN` payloads directly onto the **AWS SQS Queue** for "Austin" (covering angles like "Trending", "Hidden Gems", and "Weekend Vibes").
+3. The API immediately responds to the user (perhaps showing a loading state or a fallback) AND fires three new `MARKET_SCAN` payloads directly onto the **AWS SQS Queue** for "Austin" (covering angles like "Trending", "Hidden Gems", and "Weekend Vibes").
 4. Instantly, the Serverless **AWS Lambda Worker** is automatically invoked to process these jobs in parallel.
 5. The worker fires up the `SerpApiEventScraper`, which queries the Google Events API, formats the results, and saves the new events to Postgres.
 6. As those events are saved, the worker queues up follow-up jobs: `ENRICH_EVENT` to pull out specific vibes/tags, `GENERATE_IMAGE` to make posters, and `VERIFY_EVENT` to double-check the links.

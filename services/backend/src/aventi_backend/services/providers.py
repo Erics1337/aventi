@@ -187,7 +187,7 @@ class SerpApiEventScraper:
         self.source_name = source_name or "serpapi"
         self.source_data = source_data
         self.timeout_seconds = timeout_seconds
-        # Populated by discover(); read by execute_city_scan to forward into ingest_runs.metadata.
+        # Populated by discover(); read by execute_market_scan to forward into ingest_runs.metadata.
         self.last_meta: dict[str, Any] = {}
 
     async def discover(self, city: str, angle: str) -> list[DiscoveryCandidate]:
@@ -467,9 +467,9 @@ def _filter_by_date_window(
     return filtered
 
 
-def build_city_scan_scraper(payload: dict[str, Any]) -> SearchGroundedScraper:
+def build_market_scan_scraper(payload: dict[str, Any]) -> SearchGroundedScraper:
     source_type = str(payload.get("sourceType") or "mock").strip().lower()
-    source_name = str(payload.get("sourceName") or source_type or "city-scan")
+    source_name = str(payload.get("sourceName") or source_type or "market-scan")
     source_url = payload.get("sourceUrl")
     source_data = payload.get("sourceData")
 

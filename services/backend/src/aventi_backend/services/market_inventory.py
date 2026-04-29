@@ -12,12 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from aventi_backend.core.settings import get_settings
 from aventi_backend.services.ingest import ManualIngestService
 from aventi_backend.services.jobs import JobQueueRepository, JobType
-from aventi_backend.services.providers import DiscoveryCandidate, build_city_scan_scraper
+from aventi_backend.services.providers import DiscoveryCandidate, build_market_scan_scraper
 from aventi_backend.services.verification import VerificationService
 
 MARKET_ACTIVE_WINDOW = timedelta(days=7)
 MARKET_WARM_TARGET = 10
-CITY_SCAN_COOLDOWN = timedelta(minutes=30)
+MARKET_SCAN_COOLDOWN = timedelta(minutes=30)
 MARKET_WARMUP_COOLDOWN = timedelta(minutes=30)
 TARGETED_MINING_COOLDOWN = timedelta(minutes=10)
 DISCOVERY_ANGLES = ("Chill", "Energetic", "Romantic", "Intellectual")
@@ -101,7 +101,7 @@ def market_from_payload(payload: dict[str, Any]) -> MarketDescriptor | None:
     )
 
 
-async def execute_city_scan(
+async def execute_market_scan(
     session: AsyncSession,
     *,
     market: MarketDescriptor,
@@ -127,7 +127,7 @@ async def execute_city_scan(
     if source_data is not None:
         payload["sourceData"] = source_data
 
-    scraper = build_city_scan_scraper(payload)
+    scraper = build_market_scan_scraper(payload)
     candidates = await scraper.discover(city=market.city, angle=angle)
     # Scrapers that instrument themselves (SerpApiEventScraper) stash pagination
     # + timing stats on last_meta; others leave it empty.
@@ -344,7 +344,7 @@ class MarketWarmupService:
             last_targeted_requested_at=now,
             last_targeted_completed_at=None,
         )
-        await self._enqueue_city_scan_job(
+        await self._enqueue_market_scan_job(
             market,
             angle="targeted discovery",
             source_name="serpapi-targeted",
@@ -428,7 +428,7 @@ class MarketWarmupService:
             source_rows = await self._structured_source_rows(market.key)
             for source in source_rows:
                 config = dict(source["config"] or {})
-                run = await execute_city_scan(
+                run = await execute_market_scan(
                     self.session,
                     market=market,
                     angle=str(config.get("angle") or "market warmup"),
@@ -444,7 +444,7 @@ class MarketWarmupService:
             discovery_jobs_enqueued = 0
             if force_discovery or visible_count < MARKET_WARM_TARGET:
                 for angle in DISCOVERY_ANGLES:
-                    if await self._enqueue_city_scan_job(
+                    if await self._enqueue_market_scan_job(
                         market,
                         angle=angle,
                         source_name="serpapi",
@@ -510,7 +510,7 @@ class MarketWarmupService:
         )
         return True
 
-    async def _enqueue_city_scan_job(
+    async def _enqueue_market_scan_job(
         self,
         market: MarketDescriptor,
         *,
@@ -540,7 +540,7 @@ class MarketWarmupService:
             payload["sourceData"] = source_data
         if extra_payload:
             payload.update(extra_payload)
-        await JobQueueRepository(self.session).enqueue_job(JobType.CITY_SCAN, payload)
+        await JobQueueRepository(self.session).enqueue_job(JobType.MARKET_SCAN, payload)
         return True
 
     async def _structured_source_rows(self, market_key: str) -> list[dict[str, Any]]:
@@ -720,7 +720,7 @@ class MarketWarmupService:
         """Seed a ``market_inventory_state`` row for a newly-seen market.
 
         If the row doesn't exist yet, inserts it with ``heat_tier='warm'`` and
-        enqueues a single short-term CITY_SCAN job so the user sees events on
+        enqueues a single short-term MARKET_SCAN job so the user sees events on
         first login instead of waiting up to a week for the cron. Idempotent:
         returns ``False`` if the market is already tracked.
         """
@@ -762,7 +762,7 @@ class MarketWarmupService:
         # Fire a one-shot short-term scan so the first user doesn't see an
         # empty feed for a week. Cold markets will be re-armed via cron only.
         short_window = SCAN_WINDOWS[0]
-        await self._enqueue_city_scan_job(
+        await self._enqueue_market_scan_job(
             market,
             angle=str(short_window["angle"]),
             source_name=f"bootstrap-short:{market.city.lower()}",
@@ -773,7 +773,7 @@ class MarketWarmupService:
         return True
 
     async def enqueue_weekly_scans(self, *, limit: int = 200) -> dict[str, int]:
-        """Fan out one CITY_SCAN job per (active market × SCAN_WINDOWS).
+        """Fan out one MARKET_SCAN job per (active market × SCAN_WINDOWS).
 
         Credit budget per market comes from ``PAGE_BUDGET_BY_TIER[heat_tier]``.
         Called by the weekly EventBridge-triggered scheduler Lambda.
@@ -788,7 +788,7 @@ class MarketWarmupService:
                     "dateWindow": dict(window),
                     "pages": pages,
                 }
-                await self._enqueue_city_scan_job(
+                await self._enqueue_market_scan_job(
                     market,
                     angle=str(window["angle"]),
                     source_name=f"weekly-{window['label']}:{market.city.lower()}",
@@ -998,7 +998,7 @@ def _build_manual_events(
         manual_events.append(
             {
                 "title": candidate.title,
-                "description": candidate.description or f"Discovered by CITY_SCAN worker ({angle})",
+                "description": candidate.description or f"Discovered by MARKET_SCAN worker ({angle})",
                 "category": _normalize_category(candidate.category),
                 "bookingUrl": candidate.booking_url,
                 "startsAt": starts_at.isoformat(),

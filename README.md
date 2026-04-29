@@ -5,6 +5,7 @@ Aventi is a premium, swipe-first discovery app for local events, nightlife, and 
 This repository is a Turborepo monorepo containing:
 
 - `apps/mobile` (Expo + NativeWind mobile app)
+- `apps/web` (Next.js admin/web app)
 - `services/backend` (FastAPI API + worker)
 - `packages/*` shared contracts/client/design tokens
 - `supabase` schema and seed data
@@ -36,6 +37,24 @@ cd services/backend && uv sync
 
 > **Note:** `uv sync` must be run inside `services/backend/` where the `pyproject.toml` lives. It will **not** work from the repo root.
 
+### Environment Variables
+
+Each workspace has its own `.env.local` (gitignored). Copy from the examples and fill in your values:
+
+```bash
+cp apps/mobile/.env.example apps/mobile/.env.local      # EXPO_PUBLIC_* vars
+cp apps/web/.env.example apps/web/.env.local             # NEXT_PUBLIC_* vars
+cp services/backend/.env.example services/backend/.env.local  # AVENTI_*, API keys, AWS
+```
+
+| File | Used by | Key vars |
+|---|---|---|
+| `apps/mobile/.env.local` | Expo (React Native) | `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`, `EXPO_PUBLIC_API_BASE_URL` |
+| `apps/web/.env.local` | Next.js | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_API_BASE_URL` |
+| `services/backend/.env.local` | FastAPI / worker | `AVENTI_*`, `GOOGLE_API_KEY`, `SERPAPI_API_KEY`, `AWS_*` |
+
+> **Note:** Only `EXPO_PUBLIC_*` and `NEXT_PUBLIC_*` prefixed vars are exposed to their respective client bundles. Never put secrets in those files.
+
 ### Run Services
 
 Turborepo orchestrates mobile + backend API + worker in parallel:
@@ -46,7 +65,7 @@ pnpm dev:lite     # mobile + backend API only (no worker)
 pnpm dev:full     # alias of pnpm dev — identical command, kept for backwards compat
 ```
 
-**Note on the scheduler Lambda**: The weekly city-scan scheduler (`services/backend/src/aventi_backend/worker/scheduler.py`) only runs in production via AWS EventBridge. `pnpm dev` does **not** start it. To trigger fan-out manually in local dev:
+**Note on the scheduler Lambda**: The weekly market-scan scheduler (`services/backend/src/aventi_backend/worker/scheduler.py`) only runs in production via AWS EventBridge. `pnpm dev` does **not** start it. To trigger fan-out manually in local dev:
 
 ```bash
 uv run --project services/backend python -c "
@@ -56,7 +75,7 @@ print(asyncio.run(_run(limit=5)))
 "
 ```
 
-That enqueues CITY_SCAN jobs onto your local SQS, which the already-running worker will pick up.
+That enqueues MARKET_SCAN jobs onto your local SQS, which the already-running worker will pick up.
 
 ### Individual service commands
 
@@ -76,6 +95,9 @@ uv run --project services/backend python -m aventi_backend.worker.main
 
 # Mobile only
 pnpm --filter @aventi/mobile dev
+
+# Web app only
+pnpm turbo run dev --filter=@aventi/web
 
 # Reset local Supabase DB
 supabase db reset
@@ -141,8 +163,8 @@ The Makefile auto-loads a root `.env` file, so you can persist values like `DATA
 
 Relevant variables (in `infra/aws/terraform/variables.tf`):
 - `worker_reserved_concurrency` (default 5) — caps parallel SerpAPI calls
-- `city_scan_cron_expression` (default `cron(0 9 ? * MON *)`) — weekly fan-out schedule
-- `city_scan_max_markets` (default 200) — max markets per cron run
+- `market_scan_cron_expression` (default `cron(0 9 ? * MON *)`) — weekly fan-out schedule
+- `market_scan_max_markets` (default 200) — max markets per cron run
 
 ### Smoke tests + observability
 

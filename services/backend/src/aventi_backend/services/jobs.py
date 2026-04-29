@@ -19,7 +19,7 @@ from aventi_backend.core.settings import get_settings
 
 class JobType(StrEnum):
     MARKET_WARMUP = "MARKET_WARMUP"
-    CITY_SCAN = "CITY_SCAN"
+    MARKET_SCAN = "MARKET_SCAN"
     VERIFY_EVENT = "VERIFY_EVENT"
     ENRICH_EVENT = "ENRICH_EVENT"
     GENERATE_IMAGE = "GENERATE_IMAGE"

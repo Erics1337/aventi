@@ -1,4 +1,5 @@
 import type {
+  AdminDashboardResponse,
   FeedImpressionPayload,
   FeedRequest,
   FeedResponse,
@@ -149,6 +150,10 @@ export class AventiApiClient {
 
   getEntitlements() {
     return this.request<MembershipEntitlements>(`/v1/membership/entitlements`);
+  }
+
+  getAdminDashboard() {
+    return this.request<AdminDashboardResponse>(`/v1/admin/dashboard`);
   }
 
   getFavorites() {

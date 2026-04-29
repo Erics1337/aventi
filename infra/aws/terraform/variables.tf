@@ -154,13 +154,13 @@ variable "worker_reserved_concurrency" {
   default     = 5
 }
 
-variable "city_scan_cron_expression" {
+variable "market_scan_cron_expression" {
   type        = string
-  description = "EventBridge schedule for the weekly city scan. Default: Mondays 09:00 UTC."
+  description = "EventBridge schedule for the weekly market scan. Default: Mondays 09:00 UTC."
   default     = "cron(0 9 ? * MON *)"
 }
 
-variable "city_scan_max_markets" {
+variable "market_scan_max_markets" {
   type        = number
   description = "Max active markets the weekly scheduler will fan out per run."
   default     = 200

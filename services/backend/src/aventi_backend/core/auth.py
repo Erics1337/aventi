@@ -17,6 +17,7 @@ class AuthenticatedUser:
     id: str
     email: str | None = None
     role: str = "authenticated"
+    is_admin: bool = False
 
 
 @dataclass(slots=True)
@@ -195,7 +196,59 @@ async def require_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing sub")
 
     request.state.user_id = sub
-    return AuthenticatedUser(id=sub, email=claims.get("email"), role=str(claims.get("role", "authenticated")))
+    request.state.auth_claims = claims
+    role = _resolve_claim_role(claims)
+    return AuthenticatedUser(
+        id=sub,
+        email=claims.get("email"),
+        role=role,
+        is_admin=_claims_include_admin(claims),
+    )
+
+
+def _resolve_claim_role(claims: dict[str, Any]) -> str:
+    app_metadata = claims.get("app_metadata")
+    user_metadata = claims.get("user_metadata")
+    for value in (
+        claims.get("role"),
+        app_metadata.get("role") if isinstance(app_metadata, dict) else None,
+        user_metadata.get("role") if isinstance(user_metadata, dict) else None,
+    ):
+        if isinstance(value, str) and value.strip():
+            return value
+    return "authenticated"
+
+
+def _claims_include_admin(claims: dict[str, Any]) -> bool:
+    app_metadata = claims.get("app_metadata")
+    user_metadata = claims.get("user_metadata")
+    candidates: list[Any] = [
+        claims.get("role"),
+        claims.get("roles"),
+        app_metadata.get("role") if isinstance(app_metadata, dict) else None,
+        app_metadata.get("roles") if isinstance(app_metadata, dict) else None,
+        app_metadata.get("is_admin") if isinstance(app_metadata, dict) else None,
+        user_metadata.get("role") if isinstance(user_metadata, dict) else None,
+        user_metadata.get("roles") if isinstance(user_metadata, dict) else None,
+        user_metadata.get("is_admin") if isinstance(user_metadata, dict) else None,
+    ]
+    for candidate in candidates:
+        if candidate is True:
+            return True
+        if isinstance(candidate, str) and candidate.lower() in {"admin", "aventi_admin", "owner"}:
+            return True
+        if isinstance(candidate, list) and any(
+            isinstance(item, str) and item.lower() in {"admin", "aventi_admin", "owner"}
+            for item in candidate
+        ):
+            return True
+    return False
+
+
+async def require_admin_user(user: AuthenticatedUser = Depends(require_user)) -> AuthenticatedUser:
+    if not user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+    return user
 
 
 def require_internal_api_key(request: Request, settings: Settings = Depends(get_settings)) -> None:

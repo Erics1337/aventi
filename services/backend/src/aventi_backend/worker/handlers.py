@@ -12,7 +12,7 @@ from aventi_backend.services.jobs import JobRecord, JobType
 from aventi_backend.services.market_inventory import (
     MarketWarmupService,
     build_market_descriptor,
-    execute_city_scan,
+    execute_market_scan,
     market_from_payload,
 )
 from aventi_backend.services.verification import VerificationService
@@ -21,8 +21,8 @@ from aventi_backend.services.verification import VerificationService
 async def process_job(job: JobRecord, session: AsyncSession) -> dict[str, Any] | None:
     if job.type == JobType.MARKET_WARMUP:
         return await _handle_market_warmup(job, session)
-    if job.type == JobType.CITY_SCAN:
-        return await _handle_city_scan(job, session)
+    if job.type == JobType.MARKET_SCAN:
+        return await _handle_market_scan(job, session)
     if job.type == JobType.VERIFY_EVENT:
         return await _handle_verify_event(job, session)
     if job.type == JobType.ENRICH_EVENT:
@@ -196,19 +196,19 @@ async def _handle_enrich_event(job: JobRecord, session: AsyncSession) -> dict[st
     }
 
 
-async def _handle_city_scan(job: JobRecord, session: AsyncSession) -> dict[str, Any]:
+async def _handle_market_scan(job: JobRecord, session: AsyncSession) -> dict[str, Any]:
     payload = job.payload or {}
     market = market_from_payload(payload) or build_market_descriptor(city=str(payload.get("city") or "Austin"))
     if market is None:
-        raise ValueError("CITY_SCAN job payload requires market or city context")
-    # Propagate heat_tier hint (supplied by scheduler) so execute_city_scan can
+        raise ValueError("MARKET_SCAN job payload requires market or city context")
+    # Propagate heat_tier hint (supplied by scheduler) so execute_market_scan can
     # tag ingest_runs.metadata with the tier this scan was billed under.
     heat_tier_hint = payload.get("heatTier")
     if isinstance(heat_tier_hint, str) and heat_tier_hint:
         market.heat_tier = heat_tier_hint
     city = market.city
     angle = str(payload.get("angle") or "hidden gems")
-    source_name = str(payload.get("sourceName") or f"city-scan:{city.lower()}")
+    source_name = str(payload.get("sourceName") or f"market-scan:{city.lower()}")
     filter_signature = payload.get("filterSignature")
     extra_meta: dict[str, Any] = {}
     scan_type = payload.get("scanType")
@@ -216,7 +216,7 @@ async def _handle_city_scan(job: JobRecord, session: AsyncSession) -> dict[str, 
         extra_meta["scanType"] = scan_type
     try:
         filter_payload = payload.get("filters")
-        city_scan_result = await execute_city_scan(
+        market_scan_result = await execute_market_scan(
             session,
             market=market,
             angle=angle,
@@ -241,14 +241,14 @@ async def _handle_city_scan(job: JobRecord, session: AsyncSession) -> dict[str, 
                 market,
                 filter_signature=filter_signature,
             )
-        await MarketWarmupService(session)._mark_scan_completed(market, success=False, error=f"city_scan failed for angle={angle}")
+        await MarketWarmupService(session)._mark_scan_completed(market, success=False, error=f"market_scan failed for angle={angle}")
         await session.execute(
             text("update public.market_inventory_state set scan_lock_until = null where market_key = :key"),
             {"key": market.key},
         )
         await session.commit()
         raise
-    return {"jobId": job.id, "jobType": str(job.type), **city_scan_result}
+    return {"jobId": job.id, "jobType": str(job.type), **market_scan_result}
 
 
 def _parse_bool(value: Any) -> bool:

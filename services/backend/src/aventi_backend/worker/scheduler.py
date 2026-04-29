@@ -1,7 +1,7 @@
-"""Weekly city-scan scheduler Lambda.
+"""Weekly market-scan scheduler Lambda.
 
 Invoked by an EventBridge cron (cron(0 9 ? * MON *)). Recomputes heat tiers
-for every market, lists the hot + warm subset, and fans out one CITY_SCAN
+for every market, lists the hot + warm subset, and fans out one MARKET_SCAN
 SQS job per (market, scan-window) pair. The existing worker Lambda consumes
 those jobs via the normal SQS event source mapping.
 """
