@@ -160,11 +160,25 @@ The Makefile auto-loads a root `.env` file, so you can persist values like `DATA
 |---|---|
 | `make tf-plan` | `terraform init -upgrade` + `terraform plan` with the current `IMAGE_TAG`, saves to `tfplan` |
 | `make tf-apply` | runs `tf-plan` then `terraform apply -auto-approve tfplan` |
+| `make runtime-secret-sync` | syncs backend runtime config from an ignored local env file into AWS Secrets Manager |
 
 Relevant variables (in `infra/aws/terraform/variables.tf`):
 - `worker_reserved_concurrency` (default 5) — caps parallel SerpAPI calls
 - `market_scan_cron_expression` (default `cron(0 9 ? * MON *)`) — weekly fan-out schedule
 - `market_scan_max_markets` (default 200) — max markets per cron run
+
+Runtime secrets live in AWS Secrets Manager under `<project>-<env>/backend/env`
+by default, for example `aventi-dev/backend/env`. Terraform manages the secret
+placeholder and Lambda read permissions, but secret values are synced outside
+Terraform so they do not get written into Terraform state.
+
+```bash
+# Default source file: services/backend/.env.production
+make runtime-secret-sync
+
+# Or point at any ignored local env file
+RUNTIME_ENV_FILE=.env make runtime-secret-sync
+```
 
 ### Smoke tests + observability
 

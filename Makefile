@@ -26,7 +26,7 @@ TF_DIR := infra/aws/terraform
 export
 
 .PHONY: help deploy deploy-quick migrate migrate-reset migrate-remote migrate-psql \
-        ecr-login build push tf-plan tf-apply \
+        ecr-login build push tf-plan tf-apply runtime-secret-sync \
         smoke logs logs-api logs-scheduler scan-report rule-status rule-disable rule-enable \
         rollback-worker rollback-api
 
@@ -92,6 +92,9 @@ tf-plan: ## terraform plan (uses current IMAGE_TAG)
 
 tf-apply: tf-plan ## terraform apply (auto-plan first)
 	cd $(TF_DIR) && terraform apply -auto-approve tfplan
+
+runtime-secret-sync: ## sync backend runtime config from local env file into AWS Secrets Manager
+	bash scripts/sync-runtime-secret.sh
 
 ## ------- Step 4: Smoke test + observability --------------------------------
 smoke: ## invoke scheduler Lambda with limit=10 and print the response

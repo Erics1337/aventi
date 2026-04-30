@@ -69,7 +69,7 @@ resource "aws_sqs_queue" "worker_jobs_dlq" {
 }
 
 resource "aws_sqs_queue" "worker_jobs" {
-  name = "${local.name_prefix}-worker-jobs"
+  name                       = "${local.name_prefix}-worker-jobs"
   visibility_timeout_seconds = 900
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.worker_jobs_dlq.arn
@@ -79,7 +79,7 @@ resource "aws_sqs_queue" "worker_jobs" {
 }
 
 resource "aws_iam_role" "lambda_worker" {
-  name               = "${local.name_prefix}-lambda-worker"
+  name = "${local.name_prefix}-lambda-worker"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -120,6 +120,25 @@ resource "aws_iam_role_policy" "lambda_sqs" {
   })
 }
 
+resource "aws_iam_role_policy" "lambda_worker_runtime_secret" {
+  count = var.create_runtime_secret ? 1 : 0
+
+  name = "runtime_secret_read"
+  role = aws_iam_role.lambda_worker.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Effect   = "Allow"
+        Resource = aws_secretsmanager_secret.runtime[0].arn
+      }
+    ]
+  })
+}
+
 resource "aws_lambda_function" "worker" {
   function_name = "${local.name_prefix}-worker"
   role          = aws_iam_role.lambda_worker.arn
@@ -137,8 +156,9 @@ resource "aws_lambda_function" "worker" {
   environment {
     variables = merge(
       {
-        AVENTI_ENV           = var.environment
-        SQS_WORKER_QUEUE_URL = aws_sqs_queue.worker_jobs.url
+        AVENTI_ENV                 = var.environment
+        AVENTI_RUNTIME_SECRET_NAME = local.runtime_secret_name
+        SQS_WORKER_QUEUE_URL       = aws_sqs_queue.worker_jobs.url
       },
       var.worker_environment
     )
@@ -146,6 +166,7 @@ resource "aws_lambda_function" "worker" {
 
   depends_on = [
     aws_cloudwatch_log_group.worker,
+    aws_iam_role_policy.lambda_worker_runtime_secret,
     aws_iam_role_policy_attachment.lambda_worker_basic
   ]
 
@@ -159,7 +180,7 @@ resource "aws_lambda_event_source_mapping" "worker_sqs" {
 }
 
 resource "aws_iam_role" "lambda_api" {
-  name               = "${local.name_prefix}-lambda-api"
+  name = "${local.name_prefix}-lambda-api"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -199,15 +220,34 @@ resource "aws_iam_role_policy" "lambda_api_sqs" {
   })
 }
 
+resource "aws_iam_role_policy" "lambda_api_runtime_secret" {
+  count = var.create_runtime_secret ? 1 : 0
+
+  name = "runtime_secret_read"
+  role = aws_iam_role.lambda_api.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "secretsmanager:GetSecretValue"
+        ]
+        Effect   = "Allow"
+        Resource = aws_secretsmanager_secret.runtime[0].arn
+      }
+    ]
+  })
+}
+
 resource "aws_lambda_function" "api" {
   function_name = "${local.name_prefix}-api"
   role          = aws_iam_role.lambda_api.arn
   package_type  = "Image"
   # Uses the same shared backend image as the worker + scheduler. Handler
   # selected via image_config.command below.
-  image_uri    = "${aws_ecr_repository.worker.repository_url}:${var.api_image_tag}"
-  timeout      = 30
-  memory_size  = tonumber(var.api_memory)
+  image_uri   = "${aws_ecr_repository.worker.repository_url}:${var.api_image_tag}"
+  timeout     = 30
+  memory_size = tonumber(var.api_memory)
 
   image_config {
     command = ["aventi_backend.api.lambda_handler.handler"]
@@ -216,8 +256,9 @@ resource "aws_lambda_function" "api" {
   environment {
     variables = merge(
       {
-        AVENTI_ENV           = var.environment
-        SQS_WORKER_QUEUE_URL = aws_sqs_queue.worker_jobs.url
+        AVENTI_ENV                 = var.environment
+        AVENTI_RUNTIME_SECRET_NAME = local.runtime_secret_name
+        SQS_WORKER_QUEUE_URL       = aws_sqs_queue.worker_jobs.url
       },
       var.api_environment
     )
@@ -225,6 +266,7 @@ resource "aws_lambda_function" "api" {
 
   depends_on = [
     aws_cloudwatch_log_group.api,
+    aws_iam_role_policy.lambda_api_runtime_secret,
     aws_iam_role_policy_attachment.lambda_api_basic
   ]
 
@@ -233,11 +275,11 @@ resource "aws_lambda_function" "api" {
 
 resource "aws_lambda_function_url" "api" {
   function_name      = aws_lambda_function.api.function_name
-  authorization_type = "AWS_IAM"
+  authorization_type = "NONE"
   cors {
     allow_credentials = true
     allow_origins     = ["*"]
-    allow_methods     = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allow_methods     = ["*"]
     allow_headers     = ["content-type", "authorization", "x-api-key", "date", "keep-alive"]
     expose_headers    = ["keep-alive", "date"]
     max_age           = 86400
@@ -284,8 +326,9 @@ resource "aws_lambda_function" "scheduler" {
   environment {
     variables = merge(
       {
-        AVENTI_ENV           = var.environment
-        SQS_WORKER_QUEUE_URL = aws_sqs_queue.worker_jobs.url
+        AVENTI_ENV                 = var.environment
+        AVENTI_RUNTIME_SECRET_NAME = local.runtime_secret_name
+        SQS_WORKER_QUEUE_URL       = aws_sqs_queue.worker_jobs.url
       },
       var.worker_environment
     )
@@ -293,6 +336,7 @@ resource "aws_lambda_function" "scheduler" {
 
   depends_on = [
     aws_cloudwatch_log_group.scheduler,
+    aws_iam_role_policy.lambda_worker_runtime_secret,
     aws_iam_role_policy_attachment.lambda_worker_basic
   ]
 
