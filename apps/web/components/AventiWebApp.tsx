@@ -14,6 +14,7 @@ import {
   Filter,
   Gauge,
   Heart,
+  Home,
   Info,
   Loader2,
   Lock,
@@ -25,6 +26,7 @@ import {
   Search,
   Share2,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   User,
   X,
@@ -711,7 +713,7 @@ function EventPoster({
 }) {
   return (
     <article
-      className={`relative min-h-[min(720px,calc(100vh-130px))] mb-4 overflow-hidden rounded-lg scroll-snap-align-start bg-[#171d1a] text-[#f1f1f1] ${action === 'like' ? 'outline outline-[3px] outline-[rgba(249,216,70,0.7)]' : ''}`}
+      className={`relative h-[calc(100vh-136px)] [scroll-snap-align:start] overflow-hidden rounded-none lg:rounded-lg lg:h-auto lg:min-h-[min(720px,calc(100vh-130px))] lg:mb-4 bg-[#171d1a] text-[#f1f1f1] ${action === 'like' ? 'outline outline-[3px] outline-[rgba(249,216,70,0.7)]' : ''}`}
     >
       <img src={event.imageUrl ?? heroImages[0]} alt="" className="object-cover absolute inset-0 w-full h-full" />
       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(23,29,26,0.24),rgba(23,29,26,0.88)),linear-gradient(90deg,rgba(23,29,26,0.7),transparent_62%)]" />
@@ -719,14 +721,14 @@ function EventPoster({
         <span className="border border-[rgba(241,241,241,0.17)] rounded-lg bg-[rgba(23,29,26,0.45)] backdrop-blur-[12px] px-[10px] py-2 text-[0.72rem] font-bold tracking-[0.16em] uppercase">{categoryLabels[event.category]}</span>
         <span className="border border-[rgba(241,241,241,0.17)] rounded-lg bg-[rgba(23,29,26,0.45)] backdrop-blur-[12px] px-[10px] py-2 text-[0.72rem] font-bold tracking-[0.16em] uppercase">{formatPrice(event)}</span>
       </div>
-      <div className="absolute left-6 right-[108px] bottom-6 z-[1]">
+      <div className="absolute left-4 sm:left-6 right-[72px] sm:right-[108px] bottom-4 sm:bottom-6 z-[1]">
         <div className="inline-flex items-center gap-2 border border-[rgba(241,241,241,0.17)] rounded-lg bg-[rgba(23,29,26,0.45)] backdrop-blur-[12px] px-[10px] py-2 text-[rgba(241,241,241,0.84)] text-[0.84rem] font-bold">
           <CalendarDays size={14} />
           {formatEventTime(event.startsAt)}
         </div>
-        <h2 className="max-w-[760px] mt-[14px] mb-3 text-[clamp(2.25rem,6vw,5.7rem)] leading-[0.95] uppercase">{event.title}</h2>
-        <p className="max-w-[580px] mb-4 text-[rgba(241,241,241,0.78)] leading-[1.65]">{event.description}</p>
-        <div className="flex flex-wrap items-center gap-[14px] text-[rgba(241,241,241,0.78)] text-[0.92rem] font-semibold">
+        <h2 className="max-w-[760px] mt-[14px] mb-3 text-[clamp(1.6rem,6vw,5.7rem)] leading-[0.95] uppercase">{event.title}</h2>
+        <p className="max-w-[580px] mb-4 text-[rgba(241,241,241,0.78)] leading-[1.65] text-[0.92rem] sm:text-base">{event.description}</p>
+        <div className="flex flex-wrap items-center gap-[14px] text-[rgba(241,241,241,0.78)] text-[0.84rem] sm:text-[0.92rem] font-semibold">
           <span className="inline-flex gap-2 items-center"><MapPin size={14} />{event.venueName}</span>
           <span className="inline-flex gap-2 items-center"><Compass size={14} />{event.radiusMiles?.toFixed(1)} mi</span>
         </div>
@@ -736,7 +738,7 @@ function EventPoster({
           ))}
         </div>
       </div>
-      <div className="absolute right-[18px] bottom-6 z-[1] grid gap-[10px]">
+      <div className="absolute right-3 sm:right-[18px] bottom-4 sm:bottom-6 z-[1] grid gap-[10px]">
         <IconButton label="Pass event" variant="dark" onClick={() => onAction('pass')}><X size={21} /></IconButton>
         <IconButton label="Event details" variant="dark" onClick={onOpen}><Info size={21} /></IconButton>
         <IconButton label="Share event" variant="dark"><Share2 size={20} /></IconButton>
@@ -748,11 +750,220 @@ function EventPoster({
   );
 }
 
+function MobileFilterSheet({
+  open,
+  onClose,
+  filters,
+  isMining,
+  onToggleCategory,
+  onToggleVibe,
+  onSetDate,
+  onRefresh,
+}: {
+  open: boolean;
+  onClose: () => void;
+  filters: FeedFilters;
+  isMining: boolean;
+  onToggleCategory: (c: EventCategory) => void;
+  onToggleVibe: (v: EventVibeTag) => void;
+  onSetDate: (d: FeedFilters['date']) => void;
+  onRefresh: () => void;
+}) {
+  const activeCount =
+    (filters.categories?.length ?? 0) +
+    (filters.vibes?.length ?? 0) +
+    (filters.date !== 'week' ? 1 : 0);
+
+  return (
+    <>
+      {/* backdrop */}
+      <div
+        className={`lg:hidden fixed inset-0 z-40 bg-[rgba(23,29,26,0.5)] backdrop-blur-[2px] transition-opacity duration-300 ${open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      {/* sheet */}
+      <div
+        className={`lg:hidden fixed bottom-0 left-0 right-0 z-50 max-h-[82vh] overflow-y-auto rounded-t-2xl bg-[#f1f1f1] shadow-[0_-8px_40px_rgba(23,29,26,0.18)] transition-transform duration-300 ease-out ${open ? 'translate-y-0' : 'translate-y-full'}`}
+      >
+        {/* drag handle */}
+        <div className="flex justify-center pt-3 pb-1">
+          <div className="w-10 h-1 rounded-full bg-[rgba(23,29,26,0.18)]" />
+        </div>
+        {/* header row */}
+        <div className="flex items-center justify-between px-5 pb-3 pt-1 border-b border-[rgba(23,29,26,0.1)]">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-[1rem]">Filters</span>
+            {activeCount > 0 && (
+              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[#195339] text-[#f9d846] text-[0.65rem] font-extrabold">
+                {activeCount}
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close filters"
+            className="w-8 h-8 rounded-lg grid place-items-center border border-[rgba(23,29,26,0.14)] bg-[rgba(23,29,26,0.06)]"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-5">
+          {/* location */}
+          <div className="flex items-center gap-[10px] min-h-[42px] px-3 border border-[rgba(23,29,26,0.14)] rounded-lg bg-[rgba(241,241,241,0.72)] text-[0.86rem] font-semibold">
+            <Search size={16} />
+            <span>Denver, CO</span>
+          </div>
+
+          {/* date */}
+          <div>
+            <p className="text-[0.68rem] font-extrabold tracking-[0.14em] uppercase text-[rgba(23,29,26,0.48)] mb-2">When</p>
+            <div className="flex flex-wrap gap-2">
+              {(['today', 'tomorrow', 'weekend', 'week'] as const).map((date) => {
+                const chipBase = 'border rounded-lg inline-flex items-center gap-[7px] min-h-[36px] px-[11px] text-[0.72rem] font-bold tracking-[0.16em] uppercase bg-transparent';
+                const chipDefault = 'border-[rgba(23,29,26,0.14)] text-[rgba(23,29,26,0.72)]';
+                const chipActive = 'border-[#3a906a] bg-[rgba(58,144,106,0.12)] text-[#195339]';
+                return (
+                  <button
+                    key={date}
+                    className={`${chipBase} ${filters.date === date ? chipActive : chipDefault}`}
+                    type="button"
+                    onClick={() => onSetDate(date)}
+                  >
+                    {date === 'week' ? 'This Week' : date}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* categories */}
+          <div>
+            <p className="text-[0.68rem] font-extrabold tracking-[0.14em] uppercase text-[rgba(23,29,26,0.48)] mb-2">Category</p>
+            <div className="flex flex-wrap gap-2">
+              {categoryOptions.map((category) => {
+                const chipBase = 'border rounded-lg inline-flex items-center gap-[7px] min-h-[36px] px-[11px] text-[0.72rem] font-bold tracking-[0.16em] uppercase bg-transparent';
+                const chipDefault = 'border-[rgba(23,29,26,0.14)] text-[rgba(23,29,26,0.72)]';
+                const chipActive = 'border-[#3a906a] bg-[rgba(58,144,106,0.12)] text-[#195339]';
+                return (
+                  <button
+                    key={category}
+                    className={`${chipBase} ${(filters.categories ?? []).includes(category) ? chipActive : chipDefault}`}
+                    type="button"
+                    onClick={() => onToggleCategory(category)}
+                  >
+                    {categoryLabels[category]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* vibes */}
+          <div>
+            <p className="text-[0.68rem] font-extrabold tracking-[0.14em] uppercase text-[rgba(23,29,26,0.48)] mb-2">Vibe</p>
+            <div className="flex flex-wrap gap-2">
+              {vibeOptions.map((vibe) => {
+                const chipBase = 'border rounded-lg inline-flex items-center gap-[7px] min-h-[36px] px-[11px] text-[0.72rem] font-bold tracking-[0.16em] uppercase bg-transparent';
+                const chipDefault = 'border-[rgba(23,29,26,0.14)] text-[rgba(23,29,26,0.72)]';
+                const chipYellow = 'border-[rgba(249,216,70,0.9)] bg-[rgba(249,216,70,0.35)]';
+                return (
+                  <button
+                    key={vibe}
+                    className={`${chipBase} ${(filters.vibes ?? []).includes(vibe) ? chipYellow : chipDefault}`}
+                    type="button"
+                    onClick={() => onToggleVibe(vibe)}
+                  >
+                    {vibeLabels[vibe]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* feed status */}
+          <div className="border border-[rgba(23,29,26,0.14)] rounded-xl p-4 bg-[#195339] text-[#f1f1f1]">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <strong className="block mb-1">{isMining ? 'Mining new events…' : 'Feed ready'}</strong>
+                <p className="text-[rgba(241,241,241,0.58)] text-[0.82rem]">
+                  {isMining
+                    ? 'Refreshing event inventory.'
+                    : '184 visible events, Denver warmed 6 min ago.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { onRefresh(); onClose(); }}
+                className="shrink-0 border-0 rounded-lg inline-flex items-center justify-center gap-[8px] min-h-[44px] px-[14px] font-bold bg-[#f9d846] text-[#171d1a] text-[0.86rem]"
+              >
+                <RefreshCcw size={15} />
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {/* safe-area bottom spacer */}
+          <div className="h-[72px]" />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function MobileBottomBar({
+  activeFilters,
+  onOpenFilters,
+}: {
+  activeFilters: number;
+  onOpenFilters: () => void;
+}) {
+  const tab = 'flex flex-col items-center justify-center gap-1 flex-1 py-2 text-[0.6rem] font-bold tracking-[0.1em] uppercase text-[rgba(23,29,26,0.52)]';
+  const tabActive = 'text-[#195339]';
+
+  return (
+    <nav
+      className="lg:hidden fixed bottom-0 inset-x-0 z-30 border-t border-[rgba(23,29,26,0.1)] bg-[rgba(241,241,241,0.92)] backdrop-blur-[12px] flex items-stretch h-16 safe-area-inset-bottom"
+      aria-label="Mobile navigation"
+    >
+      <a href="/" className={`${tab}`}>
+        <Home size={22} strokeWidth={1.8} />
+        Home
+      </a>
+      <a href="/feed" className={`${tab} ${tabActive}`}>
+        <Sparkles size={22} strokeWidth={1.8} />
+        Feed
+      </a>
+      <button
+        type="button"
+        className={`${tab} relative`}
+        onClick={onOpenFilters}
+        aria-label="Open filters"
+      >
+        <SlidersHorizontal size={22} strokeWidth={1.8} />
+        {activeFilters > 0 && (
+          <span className="absolute top-2 right-[calc(50%-18px)] inline-flex items-center justify-center w-[16px] h-[16px] rounded-full bg-[#195339] text-[#f9d846] text-[0.55rem] font-extrabold">
+            {activeFilters}
+          </span>
+        )}
+        Filters
+      </button>
+      <button type="button" className={`${tab}`}>
+        <User size={22} strokeWidth={1.8} />
+        Profile
+      </button>
+    </nav>
+  );
+}
+
 export function EventFeedPage() {
   const [events, setEvents] = useState<EventCard[]>(demoEvents);
   const [actions, setActions] = useState<Record<string, SwipeAction>>({});
   const [selectedEvent, setSelectedEvent] = useState<EventCard | null>(demoEvents[0] ?? null);
   const [isMining, setIsMining] = useState(false);
+  const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false);
   const [filters, setFilters] = useState<FeedFilters>({
     date: 'week',
     price: 'any',
@@ -806,12 +1017,17 @@ export function EventFeedPage() {
     }, 900);
   }
 
+  const activeFilterCount =
+    (filters.categories?.length ?? 0) +
+    (filters.vibes?.length ?? 0) +
+    (filters.date !== 'week' ? 1 : 0);
+
   return (
     <>
       <AppHeader active="feed" />
-      <section className="min-h-[calc(100vh-72px)] px-[clamp(16px,4vw,64px)] py-[clamp(62px,8vw,110px)]" id="feed">
-        <div className="grid grid-cols-[280px_minmax(320px,1fr)_320px] gap-4 items-start">
-          <aside className="sticky top-[84px] border border-[rgba(23,29,26,0.14)] rounded-lg bg-[rgba(255,255,255,0.48)] shadow-[0_24px_70px_rgba(23,29,26,0.2)] p-[18px]">
+      <section className="lg:min-h-[calc(100vh-72px)] lg:px-[clamp(16px,4vw,64px)] lg:py-[clamp(24px,6vw,110px)]" id="feed">
+        <div className="grid grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)_320px] gap-4 items-start">
+          <aside className="hidden lg:block border border-[rgba(23,29,26,0.14)] rounded-lg bg-[rgba(255,255,255,0.48)] shadow-[0_24px_70px_rgba(23,29,26,0.2)] p-[18px] lg:sticky lg:top-[84px]">
             <div className="mb-5"><LogoMark /></div>
             <div className="flex items-center gap-[10px] min-h-[42px] px-3 border border-[rgba(23,29,26,0.14)] rounded-lg bg-[rgba(241,241,241,0.72)] text-[0.86rem] font-semibold">
               <Search size={16} />
@@ -843,7 +1059,7 @@ export function EventFeedPage() {
               </button>
             </div>
           </aside>
-          <main className="h-[min(760px,calc(100vh-118px))] overflow-y-auto [scroll-snap-type:y_mandatory] pr-1" aria-label="Aventi event feed">
+          <main className="h-[calc(100vh-136px)] overflow-y-scroll [scroll-snap-type:y_mandatory] [overscroll-behavior-y:contain] lg:h-[min(760px,calc(100vh-118px))] lg:overflow-y-auto lg:pr-1" aria-label="Aventi event feed">
             {filteredEvents.length > 0 ? (
               filteredEvents.map((event) => (
                 <EventPoster
@@ -868,12 +1084,12 @@ export function EventFeedPage() {
                 </button>
               </div>
             )}
-            <div className="flex items-center justify-center gap-2 min-h-[72px] mb-4 text-[rgba(23,29,26,0.54)] text-[0.78rem] font-extrabold uppercase">
+            <div className="hidden lg:flex items-center justify-center gap-2 min-h-[72px] mb-4 text-[rgba(23,29,26,0.54)] text-[0.78rem] font-extrabold uppercase">
               <ChevronDown size={18} />
               <span>Pull past the end to mine more events</span>
             </div>
           </main>
-          <aside className="sticky top-[84px] border border-[rgba(23,29,26,0.14)] rounded-lg bg-[rgba(255,255,255,0.48)] shadow-[0_24px_70px_rgba(23,29,26,0.2)] p-[18px]">
+          <aside className="hidden xl:block xl:sticky xl:top-[84px] border border-[rgba(23,29,26,0.14)] rounded-lg bg-[rgba(255,255,255,0.48)] shadow-[0_24px_70px_rgba(23,29,26,0.2)] p-[18px]">
             {selectedEvent ? (
               <>
                 <span className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-[#3a906a]">Selected Event</span>
@@ -905,6 +1121,20 @@ export function EventFeedPage() {
           </aside>
         </div>
       </section>
+      <MobileFilterSheet
+        open={isFilterSheetOpen}
+        onClose={() => setIsFilterSheetOpen(false)}
+        filters={filters}
+        isMining={isMining}
+        onToggleCategory={toggleCategory}
+        onToggleVibe={toggleVibe}
+        onSetDate={(date) => setFilters((current) => ({ ...current, date }))}
+        onRefresh={refreshFeed}
+      />
+      <MobileBottomBar
+        activeFilters={activeFilterCount}
+        onOpenFilters={() => setIsFilterSheetOpen(true)}
+      />
       <AuthModal />
     </>
   );
