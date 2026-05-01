@@ -1,0 +1,20 @@
+name: Keep Supabase Alive
+
+on:
+  schedule:
+    - cron: '0 0 * * 0,5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping-db:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST API
+        run: |
+          curl --fail-with-body --silent --show-error \
+            -X GET "${{ secrets.SUPABASE_URL }}/rest/v1/keep_alive_pings?select=id&limit=1" \
+            -H "apikey: ${{ secrets.SUPABASE_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_KEY }}"

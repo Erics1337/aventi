@@ -51,12 +51,9 @@ migrate-reset: ## ⚠️  WIPES local db + re-applies ALL migrations from scratc
 	supabase db reset --local
 	@echo "✅ local db reset from migrations"
 
-migrate-remote: ## push migrations to linked remote project (requires SUPABASE_DB_PASSWORD)
-	@if [ -z "$$SUPABASE_DB_PASSWORD" ]; then \
-	  echo "❌ SUPABASE_DB_PASSWORD not set (grab from Supabase dashboard → Project Settings → Database)"; \
-	  exit 1; \
-	fi
-	SUPABASE_DB_PASSWORD="$$SUPABASE_DB_PASSWORD" supabase db push
+migrate-remote: ## push migrations to remote Supabase using DATABASE_URL
+	@test -n "$$DATABASE_URL" || (echo "❌ DATABASE_URL not set"; exit 1)
+	supabase db push --db-url "$$DATABASE_URL" --yes
 
 migrate-psql: ## apply migration 0008 directly via psql (uses DATABASE_URL)
 	@test -n "$$DATABASE_URL" || (echo "❌ DATABASE_URL not set"; exit 1)
