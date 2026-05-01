@@ -2,13 +2,54 @@
 @import "tailwindcss";
 
 @theme {
+  /* Marketing brand (the website) */
   --color-aventi-white: #f1f1f1;
   --color-black-grey: #171d1a;
   --color-dark-green: #195339;
   --color-green: #3a906a;
   --color-mellow-yellow: #f9d846;
 
+  /* App brand (dark immersive — feed, profile, saved, filters, discovery, admin) */
+  --color-app-bg: #07070d;
+  --color-app-bg-elev: #0d0d18;
+  --color-app-surface: rgba(255, 255, 255, 0.04);
+  --color-app-surface-2: rgba(255, 255, 255, 0.07);
+  --color-app-border: rgba(255, 255, 255, 0.08);
+  --color-app-border-strong: rgba(255, 255, 255, 0.14);
+  --color-app-text: rgba(255, 255, 255, 0.95);
+  --color-app-text-muted: rgba(255, 255, 255, 0.55);
+  --color-app-text-faint: rgba(255, 255, 255, 0.35);
+
+  --color-violet: #6b4bff;
+  --color-violet-bright: #a67cff;
+  --color-violet-deep: #4a2fd6;
+  --color-success-neon: #4dffa8;
+  --color-danger-glow: #ff4d6d;
+
   --font-sans: Poppins, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+:root {
+  /* Motion */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.5, 0, 0.5, 1);
+  --dur-fast: 160ms;
+  --dur-base: 220ms;
+  --dur-slow: 320ms;
+
+  /* Gradients */
+  --gradient-premium: linear-gradient(120deg, #f9d846 0%, #b98fff 55%, #6b4bff 100%);
+  --gradient-violet: linear-gradient(120deg, #6b4bff 0%, #8e5cff 55%, #a67cff 100%);
+  --gradient-glow-red: linear-gradient(120deg, #ff4d6d 0%, #ff7a8b 100%);
+
+  /* Radii (pair) */
+  --radius-card: 16px;
+  --radius-pill: 9999px;
+
+  /* Glow shadows */
+  --glow-violet: 0 20px 60px rgba(107, 75, 255, 0.35);
+  --glow-success: 0 0 24px rgba(77, 255, 168, 0.35);
+  --glow-danger: 0 0 18px rgba(255, 77, 109, 0.45);
 }
 
 *,
