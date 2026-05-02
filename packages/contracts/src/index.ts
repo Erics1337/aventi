@@ -9,11 +9,26 @@ export type EventVibeTag =
   | 'luxury'
   | 'live-music'
   | 'wellness'
-  | 'late-night';
+  | 'late-night'
+  | 'solo-friendly'
+  | 'family'
+  | 'adventurous'
+  | 'intimate'
+  | 'underground';
 
 export type ReportReason = 'invalid' | 'cancelled' | 'duplicate' | 'unsafe' | 'other';
 
-export type EventCategory = 'nightlife' | 'dining' | 'concerts' | 'wellness' | 'experiences';
+export type EventCategory =
+  | 'nightlife'
+  | 'dining'
+  | 'concerts'
+  | 'wellness'
+  | 'experiences'
+  | 'comedy'
+  | 'sports'
+  | 'outdoors'
+  | 'markets'
+  | 'tech';
 
 export interface TicketOffer {
   url: string;
