@@ -26,6 +26,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.aventi.app",
       "buildNumber": "2",
+      "icon": "./assets/ios-icon.png",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
