@@ -18,6 +18,9 @@ web-build/
 android/
 ios/
 
+# API Keys
+pc-api-key.json
+
 # Python
 __pycache__/
 *.py[cod]
