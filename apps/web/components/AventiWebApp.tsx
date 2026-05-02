@@ -797,6 +797,25 @@ function EventPoster({
   onAction: (action: SwipeAction) => void;
   onOpen: () => void;
 }) {
+  const handleShare = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: event.title,
+          text: `Check out ${event.title} on Aventi!`,
+          url: window.location.href,
+        });
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') {
+          console.error('Error sharing:', err);
+        }
+      }
+    } else {
+      await navigator.clipboard.writeText(`${event.title} - ${window.location.href}`);
+      alert('Event link copied to clipboard!');
+    }
+  };
+
   return (
     <article
       className={`relative h-[calc(100dvh-176px)] [scroll-snap-align:start] overflow-hidden rounded-none md:rounded-[var(--radius-card)] md:h-auto md:min-h-[min(720px,calc(100dvh-160px))] md:mb-4 bg-[var(--color-app-bg-elev)] text-white ${motion.base} ${
@@ -848,7 +867,7 @@ function EventPoster({
         <PosterIconButton label="Event details" onClick={onOpen}>
           <Info size={20} strokeWidth={1.6} />
         </PosterIconButton>
-        <PosterIconButton label="Share event">
+        <PosterIconButton label="Share event" onClick={handleShare}>
           <Share2 size={19} strokeWidth={1.6} />
         </PosterIconButton>
         <PosterIconButton
