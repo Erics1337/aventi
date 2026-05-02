@@ -54,3 +54,4 @@ crash.log
 supabase/.temp
 
 .agents
+pc-api-key.json
