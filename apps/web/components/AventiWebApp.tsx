@@ -1179,7 +1179,10 @@ export function EventFeedPage() {
   const closeFilters = () => {
     setIsFilterSheetOpen(false);
     if (searchParams?.get('filters') === 'open') {
-      router.replace(pathname);
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete('filters');
+      const newQuery = params.toString();
+      router.replace(newQuery ? `${pathname}?${newQuery}` : pathname);
     }
   };
 
