@@ -1,11 +1,8 @@
 """Supabase Storage service for uploading and managing event images."""
 from __future__ import annotations
 
-import io
 import asyncio
-import uuid
-from datetime import datetime, timedelta
-from typing import Any
+from datetime import datetime
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,10 +13,10 @@ from aventi_backend.core.settings import get_settings
 class SupabaseStorageService:
     """Service for uploading images to Supabase Storage."""
 
-    def __init__(self, service_role_key: str | None = None) -> None:
+    def __init__(self, supabase_secret_key: str | None = None) -> None:
         settings = get_settings()
         self.base_url = settings.supabase_url.rstrip("/") if settings.supabase_url else None
-        self.service_key = service_role_key or settings.supabase_service_role_key
+        self.service_key = supabase_secret_key or settings.supabase_secret_key
         self.bucket_name = "event-images"
 
     def _auth_headers(self, *, content_type: str | None = None) -> dict[str, str]:

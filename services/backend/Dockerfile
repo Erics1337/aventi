@@ -6,7 +6,7 @@
 #   - aws_lambda_function.worker    -> aventi_backend.worker.lambda_handler.handler (default CMD)
 #   - aws_lambda_function.scheduler -> aventi_backend.worker.scheduler.handler
 
-FROM public.ecr.aws/lambda/python:3.12
+FROM public.ecr.aws/lambda/python:3.13
 
 # Install uv (fast, deterministic dependency resolution).
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv

@@ -39,9 +39,10 @@ cd services/backend && uv sync
 
 ### Environment Variables
 
-Each workspace has its own `.env.local` (gitignored). Copy from the examples and fill in your values:
+Repo-level ops commands and each workspace have their own env files. Copy from the examples and fill in your values:
 
 ```bash
+cp .env.example .env                                # Makefile / repo ops vars
 cp apps/mobile/.env.example apps/mobile/.env.local      # EXPO_PUBLIC_* vars
 cp apps/web/.env.example apps/web/.env.local             # NEXT_PUBLIC_* vars
 cp services/backend/.env.example services/backend/.env.local  # AVENTI_*, API keys, AWS
@@ -49,11 +50,14 @@ cp services/backend/.env.example services/backend/.env.local  # AVENTI_*, API ke
 
 | File | Used by | Key vars |
 |---|---|---|
+| `.env` | Root `Makefile` / repo ops | `DATABASE_URL`, `AWS_REGION`, `ENV`, `PROJECT` |
 | `apps/mobile/.env.local` | Expo (React Native) | `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`, `EXPO_PUBLIC_API_BASE_URL` |
 | `apps/web/.env.local` | Next.js | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_API_BASE_URL` |
 | `services/backend/.env.local` | FastAPI / worker | `AVENTI_*`, `GOOGLE_API_KEY`, `SERPAPI_API_KEY`, `AWS_*` |
 
 > **Note:** Only `EXPO_PUBLIC_*` and `NEXT_PUBLIC_*` prefixed vars are exposed to their respective client bundles. Never put secrets in those files.
+>
+> **Ops note:** root `DATABASE_URL` is for migrations, `psql`, and repo-level reports. It should be a direct Postgres URL like `postgresql://postgres:<percent-encoded-password>@db.<project-ref>.supabase.co:5432/postgres`, not the backend `AVENTI_DATABASE_URL` / `postgresql+asyncpg://...` runtime URL and not the Supabase pooler URL.
 
 ### Run Services
 
@@ -126,7 +130,7 @@ make deploy ENV=prod AWS_REGION=us-west-2     # prod
 make build IMAGE_TAG=hotfix-serpapi           # pinned tag
 ```
 
-The Makefile auto-loads a root `.env` file, so you can persist values like `DATABASE_URL`, `SUPABASE_DB_PASSWORD`, or `AWS_REGION` there (already gitignored).
+The Makefile auto-loads a root `.env` file, so you can persist repo-ops values like `DATABASE_URL` or `AWS_REGION` there. The root `.env` file is gitignored.
 
 ### Full pipelines
 
@@ -141,7 +145,7 @@ The Makefile auto-loads a root `.env` file, so you can persist values like `DATA
 |---|---|---|
 | `make migrate` | **local** | `supabase migration up --local` — applies pending migrations to your local dev stack. |
 | `make migrate-reset` | **local** | ⚠️ `supabase db reset --local` — wipes local DB and replays all migrations from scratch. |
-| `make migrate-remote` | **cloud** | `supabase db push` to the linked project. Requires `SUPABASE_DB_PASSWORD` (grab from Supabase dashboard → Project Settings → Database). |
+| `make migrate-remote` | **cloud** | `supabase db push --db-url "$DATABASE_URL" --yes`. Requires a direct Postgres `DATABASE_URL` in the root `.env` or shell environment. |
 | `make migrate-psql` | **either** | Raw `psql -f` of a specific migration file against `$DATABASE_URL`. Useful when the CLI is misbehaving. |
 
 **Starting local Supabase**: `supabase start` before the first `make migrate`. Check status with `supabase status`.
@@ -160,11 +164,25 @@ The Makefile auto-loads a root `.env` file, so you can persist values like `DATA
 |---|---|
 | `make tf-plan` | `terraform init -upgrade` + `terraform plan` with the current `IMAGE_TAG`, saves to `tfplan` |
 | `make tf-apply` | runs `tf-plan` then `terraform apply -auto-approve tfplan` |
+| `make runtime-secret-sync` | syncs backend runtime config from an ignored local env file into AWS Secrets Manager |
 
 Relevant variables (in `infra/aws/terraform/variables.tf`):
 - `worker_reserved_concurrency` (default 5) — caps parallel SerpAPI calls
 - `market_scan_cron_expression` (default `cron(0 9 ? * MON *)`) — weekly fan-out schedule
 - `market_scan_max_markets` (default 200) — max markets per cron run
+
+Runtime secrets live in AWS Secrets Manager under `<project>-<env>/backend/env`
+by default, for example `aventi-dev/backend/env`. Terraform manages the secret
+placeholder and Lambda read permissions, but secret values are synced outside
+Terraform so they do not get written into Terraform state.
+
+```bash
+# Default source file: services/backend/.env.production
+make runtime-secret-sync
+
+# Or point at any ignored local env file
+RUNTIME_ENV_FILE=.env make runtime-secret-sync
+```
 
 ### Smoke tests + observability
 

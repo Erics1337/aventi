@@ -13,7 +13,7 @@ enable_anonymous_sign_ins = true
 [db]
 port = 54332
 shadow_port = 54333
-major_version = 15
+major_version = 17
 
 [studio]
 enabled = true

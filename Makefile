@@ -26,7 +26,7 @@ TF_DIR := infra/aws/terraform
 export
 
 .PHONY: help deploy deploy-quick migrate migrate-reset migrate-remote migrate-psql \
-        ecr-login build push tf-plan tf-apply \
+        ecr-login build push tf-plan tf-apply runtime-secret-sync \
         smoke logs logs-api logs-scheduler scan-report rule-status rule-disable rule-enable \
         rollback-worker rollback-api
 
@@ -51,12 +51,9 @@ migrate-reset: ## ⚠️  WIPES local db + re-applies ALL migrations from scratc
 	supabase db reset --local
 	@echo "✅ local db reset from migrations"
 
-migrate-remote: ## push migrations to linked remote project (requires SUPABASE_DB_PASSWORD)
-	@if [ -z "$$SUPABASE_DB_PASSWORD" ]; then \
-	  echo "❌ SUPABASE_DB_PASSWORD not set (grab from Supabase dashboard → Project Settings → Database)"; \
-	  exit 1; \
-	fi
-	SUPABASE_DB_PASSWORD="$$SUPABASE_DB_PASSWORD" supabase db push
+migrate-remote: ## push migrations to remote Supabase using DATABASE_URL
+	@test -n "$$DATABASE_URL" || (echo "❌ DATABASE_URL not set"; exit 1)
+	supabase db push --db-url "$$DATABASE_URL" --yes
 
 migrate-psql: ## apply migration 0008 directly via psql (uses DATABASE_URL)
 	@test -n "$$DATABASE_URL" || (echo "❌ DATABASE_URL not set"; exit 1)
@@ -92,6 +89,9 @@ tf-plan: ## terraform plan (uses current IMAGE_TAG)
 
 tf-apply: tf-plan ## terraform apply (auto-plan first)
 	cd $(TF_DIR) && terraform apply -auto-approve tfplan
+
+runtime-secret-sync: ## sync backend runtime config from local env file into AWS Secrets Manager
+	bash scripts/sync-runtime-secret.sh
 
 ## ------- Step 4: Smoke test + observability --------------------------------
 smoke: ## invoke scheduler Lambda with limit=10 and print the response

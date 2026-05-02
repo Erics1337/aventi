@@ -1,8 +1,42 @@
+import json
+import os
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+import boto3
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_RUNTIME_SECRET_LOADED = False
+
+
+def _load_runtime_secret_into_environ() -> None:
+    """Load AWS Secrets Manager JSON config once, without overwriting explicit env vars."""
+    global _RUNTIME_SECRET_LOADED
+
+    if _RUNTIME_SECRET_LOADED:
+        return
+
+    _RUNTIME_SECRET_LOADED = True
+
+    secret_name = os.environ.get("AVENTI_RUNTIME_SECRET_NAME")
+    if not secret_name:
+        return
+
+    client = boto3.client("secretsmanager")
+    response = client.get_secret_value(SecretId=secret_name)
+    secret_string = response.get("SecretString")
+    if not secret_string:
+        return
+
+    payload = json.loads(secret_string)
+    if not isinstance(payload, dict):
+        raise ValueError("AVENTI_RUNTIME_SECRET_NAME must contain a JSON object")
+
+    for key, value in payload.items():
+        if value is None or key in os.environ:
+            continue
+        os.environ[str(key)] = str(value)
 
 
 class Settings(BaseSettings):
@@ -23,10 +57,18 @@ class Settings(BaseSettings):
     database_url: str | None = Field(default=None, alias="AVENTI_DATABASE_URL")
     supabase_url: str | None = Field(default=None, alias="AVENTI_SUPABASE_URL")
     supabase_jwks_url: str | None = Field(default=None, alias="AVENTI_SUPABASE_JWKS_URL")
-    supabase_jwt_audience: str = Field(default="authenticated", alias="AVENTI_SUPABASE_JWT_AUDIENCE")
+    supabase_jwt_audience: str = Field(
+        default="authenticated", alias="AVENTI_SUPABASE_JWT_AUDIENCE"
+    )
     supabase_jwt_secret: str | None = Field(default=None, alias="AVENTI_SUPABASE_JWT_SECRET")
     supabase_issuer: str | None = Field(default=None, alias="AVENTI_SUPABASE_ISSUER")
-    supabase_service_role_key: str | None = Field(default=None, alias="AVENTI_SUPABASE_SERVICE_ROLE_KEY")
+    supabase_secret_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "AVENTI_SUPABASE_SECRET_KEY",
+            "AVENTI_SUPABASE_SERVICE_ROLE_KEY",
+        ),
+    )
     internal_api_key: str | None = Field(default=None, alias="AVENTI_INTERNAL_API_KEY")
     free_swipe_limit: int = Field(default=10, alias="AVENTI_FREE_SWIPE_LIMIT")
     feed_verification_max_age_hours: int = Field(
@@ -49,4 +91,5 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    _load_runtime_secret_into_environ()
     return Settings()

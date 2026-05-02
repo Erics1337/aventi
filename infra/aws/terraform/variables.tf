@@ -78,13 +78,13 @@ variable "worker_command" {
 
 variable "api_environment" {
   type        = map(string)
-  description = "Non-sensitive environment variables for the API container."
+  description = "Non-sensitive environment variables for the API Lambda. Put secrets in the runtime secret instead."
   default     = {}
 }
 
 variable "worker_environment" {
   type        = map(string)
-  description = "Non-sensitive environment variables for the worker container."
+  description = "Non-sensitive environment variables for the worker Lambda. Put secrets in the runtime secret instead."
   default     = {}
 }
 
@@ -138,8 +138,8 @@ variable "health_check_path" {
 
 variable "create_runtime_secret" {
   type        = bool
-  description = "Create an empty Secrets Manager secret placeholder for runtime configuration."
-  default     = false
+  description = "Create a Secrets Manager secret placeholder for runtime configuration."
+  default     = true
 }
 
 variable "runtime_secret_name" {
