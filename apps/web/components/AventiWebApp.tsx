@@ -799,7 +799,7 @@ function EventPoster({
 }) {
   return (
     <article
-      className={`relative h-[calc(100vh-176px)] [scroll-snap-align:start] overflow-hidden rounded-none md:rounded-[var(--radius-card)] md:h-auto md:min-h-[min(720px,calc(100vh-160px))] md:mb-4 bg-[var(--color-app-bg-elev)] text-white ${motion.base} ${
+      className={`relative h-[calc(100dvh-176px)] [scroll-snap-align:start] overflow-hidden rounded-none md:rounded-[var(--radius-card)] md:h-auto md:min-h-[min(720px,calc(100dvh-160px))] md:mb-4 bg-[var(--color-app-bg-elev)] text-white ${motion.base} ${
         action === 'like'
           ? 'outline outline-[3px] outline-[var(--color-violet)] shadow-[var(--glow-violet)]'
           : ''
@@ -888,6 +888,16 @@ function MobileFilterSheet({
     (filters.vibes?.length ?? 0) +
     (filters.date !== 'week' ? 1 : 0);
 
+  // Escape closes the sheet — standard modal-dialog interaction.
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [open, onClose]);
+
   const chipBase = `${motion.base} inline-flex items-center gap-2 h-9 px-3 rounded-full text-[0.8125rem] font-medium border`;
   const chipIdle =
     'border-[var(--color-app-border)] bg-[var(--color-app-surface)] text-[var(--color-app-text-muted)] hover:text-[var(--color-app-text)]';
@@ -907,7 +917,14 @@ function MobileFilterSheet({
       />
       {/* sheet — bottom on mobile, centered & narrower on desktop */}
       <div
-        className={`fixed bottom-0 left-0 right-0 mx-auto md:max-w-[560px] md:bottom-6 z-50 max-h-[88vh] md:max-h-[min(720px,calc(100vh-64px))] overflow-y-auto rounded-t-[24px] md:rounded-[var(--radius-card)] border border-[var(--color-app-border)] md:border-t md:border bg-[rgba(7,7,13,0.96)] backdrop-blur-[18px] text-white shadow-[0_-30px_80px_rgba(0,0,0,0.5)] transition-transform duration-[var(--dur-base)] ease-[var(--ease-out)] ${
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="aventi-filters-title"
+        // `inert` prevents focus + screen-reader access when the sheet is
+        // animated off-screen, since we keep it mounted for the transition.
+        // React 19+ accepts the boolean directly.
+        inert={!open}
+        className={`fixed bottom-0 left-0 right-0 mx-auto md:max-w-[560px] md:bottom-6 z-50 max-h-[88dvh] md:max-h-[min(720px,calc(100dvh-64px))] overflow-y-auto rounded-t-[24px] md:rounded-[var(--radius-card)] border border-[var(--color-app-border)] md:border-t md:border bg-[rgba(7,7,13,0.96)] backdrop-blur-[18px] text-white shadow-[0_-30px_80px_rgba(0,0,0,0.5)] transition-transform duration-[var(--dur-base)] ease-[var(--ease-out)] ${
           open ? 'translate-y-0' : 'translate-y-full'
         }`}
       >
@@ -918,7 +935,7 @@ function MobileFilterSheet({
         {/* header */}
         <div className="flex items-center justify-between px-5 pb-3 pt-1 border-b border-[var(--color-app-border)]">
           <div className="flex items-center gap-2">
-            <span className={type.h2}>Filters</span>
+            <span id="aventi-filters-title" className={type.h2}>Filters</span>
             {activeCount > 0 && (
               <span className="inline-grid place-items-center min-w-5 h-5 px-1.5 rounded-full bg-[var(--color-violet)] text-white text-[0.7rem] font-bold">
                 {activeCount}
@@ -1162,7 +1179,7 @@ export function EventFeedPage() {
 
         <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-5 items-start">
           <main
-            className="h-[calc(100vh-176px)] overflow-y-scroll [scroll-snap-type:y_mandatory] [overscroll-behavior-y:contain] md:h-[min(820px,calc(100vh-160px))] md:overflow-y-auto pr-1"
+            className="h-[calc(100dvh-176px)] overflow-y-scroll [scroll-snap-type:y_mandatory] [overscroll-behavior-y:contain] md:h-[min(820px,calc(100dvh-160px))] md:overflow-y-auto pr-1"
             aria-label="Aventi event feed"
           >
             {filteredEvents.length > 0 ? (
