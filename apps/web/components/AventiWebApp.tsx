@@ -1783,7 +1783,7 @@ export function ProfilePage() {
         )}
 
         {/* Destructive */}
-        <Button variant="destructive" size="md" fullWidth className="mt-5 !border-transparent">
+        <Button variant="destructive" size="md" fullWidth className="mt-5 !border-transparent" disabled title="Account deletion coming soon">
           Delete account
         </Button>
       </div>
