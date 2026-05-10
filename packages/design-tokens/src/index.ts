@@ -20,7 +20,6 @@ export const spacing = {
   buttonSize: 60,
   screenGutter: 20,
 } as const;
-
 export const typography = {
   heroTitle: {
     letterSpacing: 2,
@@ -59,3 +58,4 @@ export const nativeWindThemeExtend = {
     'aventi-card': `${spacing.cardRadius}px`,
   },
 } as const;
+

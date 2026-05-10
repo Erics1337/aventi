@@ -127,13 +127,13 @@ function NavMenu({
 
   const isDark = theme === 'dark';
   const panel = isDark
-    ? 'bg-[#171d1a] text-[#f1f1f1] border-[rgba(241,241,241,0.12)]'
-    : 'bg-[#f1f1f1] text-[#171d1a] border-[rgba(23,29,26,0.12)]';
+    ? 'bg-black-grey text-aventi-white border-[rgba(241,241,241,0.12)]'
+    : 'bg-aventi-white text-black-grey border-[rgba(23,29,26,0.12)]';
   const divider = isDark ? 'border-[rgba(241,241,241,0.1)]' : 'border-[rgba(23,29,26,0.1)]';
   const linkBase = 'flex items-center gap-3 rounded-lg px-4 py-3 text-[1rem] font-bold transition-colors';
   const linkActive = isDark
-    ? 'bg-[rgba(249,216,70,0.12)] text-[#f9d846]'
-    : 'bg-[rgba(25,83,57,0.1)] text-[#195339]';
+    ? 'bg-[rgba(249,216,70,0.12)] text-mellow-yellow'
+    : 'bg-[rgba(25,83,57,0.1)] text-dark-green';
   const linkIdle = isDark
     ? 'text-[rgba(241,241,241,0.78)] hover:bg-[rgba(241,241,241,0.07)]'
     : 'text-[rgba(23,29,26,0.72)] hover:bg-[rgba(23,29,26,0.06)]';
@@ -189,7 +189,7 @@ function NavMenu({
         <div className="px-3 py-4">
           <a
             href="#get-app"
-            className="flex items-center gap-3 rounded-lg px-4 py-3 font-bold bg-[#f9d846] text-[#171d1a]"
+            className="flex items-center gap-3 rounded-lg px-4 py-3 font-bold bg-mellow-yellow text-black-grey"
             onClick={onClose}
           >
             <Play size={18} />
@@ -243,7 +243,7 @@ function AppHeader({ active }: { active: 'home' | 'feed' | 'admin' }) {
   const navLink = (href: string, label: string, key: 'home' | 'feed' | 'admin') => (
     <a
       key={key}
-      className={`rounded-lg px-[10px] py-[9px] ${active === key ? 'bg-[rgba(25,83,57,0.12)] text-[#195339]' : 'text-[rgba(23,29,26,0.64)]'}`}
+      className={`rounded-lg px-[10px] py-[9px] ${active === key ? 'bg-[rgba(25,83,57,0.12)] text-dark-green' : 'text-[rgba(23,29,26,0.64)]'}`}
       href={href}
     >
       {label}
@@ -256,7 +256,7 @@ function AppHeader({ active }: { active: 'home' | 'feed' | 'admin' }) {
         <Bell size={18} />
       </IconButton>
       <a
-        className="hidden sm:inline-flex border-0 rounded-lg items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[#f9d846] text-[#171d1a]"
+        className="hidden sm:inline-flex border-0 rounded-lg items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-mellow-yellow text-black-grey"
         href="#get-app"
       >
         Get App
@@ -265,7 +265,7 @@ function AppHeader({ active }: { active: 'home' | 'feed' | 'admin' }) {
       {mounted ? (
         auth.isAuthenticated ? (
           <button
-            className="inline-flex items-center gap-2 rounded-lg border border-[rgba(23,29,26,0.14)] bg-[rgba(23,29,26,0.06)] px-3 h-[42px] text-[0.82rem] font-bold text-[#171d1a] hover:bg-[rgba(23,29,26,0.1)]"
+            className="inline-flex items-center gap-2 rounded-lg border border-[rgba(23,29,26,0.14)] bg-[rgba(23,29,26,0.06)] px-3 h-[42px] text-[0.82rem] font-bold text-black-grey hover:bg-[rgba(23,29,26,0.1)]"
             type="button"
             onClick={() => setMenuOpen(true)}
             title={auth.email || 'Account'}
@@ -277,7 +277,7 @@ function AppHeader({ active }: { active: 'home' | 'feed' | 'admin' }) {
           </button>
         ) : (
           <button
-            className="inline-flex items-center gap-2 rounded-lg border border-[rgba(23,29,26,0.14)] bg-[rgba(23,29,26,0.06)] px-3 h-[42px] text-[0.82rem] font-bold text-[#171d1a] hover:bg-[rgba(23,29,26,0.1)]"
+            className="inline-flex items-center gap-2 rounded-lg border border-[rgba(23,29,26,0.14)] bg-[rgba(23,29,26,0.06)] px-3 h-[42px] text-[0.82rem] font-bold text-black-grey hover:bg-[rgba(23,29,26,0.1)]"
             type="button"
             onClick={() => auth.openAuthPrompt('welcome')}
           >
@@ -290,7 +290,7 @@ function AppHeader({ active }: { active: 'home' | 'feed' | 'admin' }) {
       )}
       {/* Hamburger — mobile only */}
       <button
-        className="sm:hidden w-[42px] h-[42px] rounded-lg inline-grid place-items-center border border-[rgba(23,29,26,0.14)] bg-[rgba(23,29,26,0.06)] text-[#171d1a]"
+        className="sm:hidden w-[42px] h-[42px] rounded-lg inline-grid place-items-center border border-[rgba(23,29,26,0.14)] bg-[rgba(23,29,26,0.06)] text-black-grey"
         type="button"
         onClick={() => setMenuOpen(true)}
         aria-label="Open menu"
@@ -302,7 +302,7 @@ function AppHeader({ active }: { active: 'home' | 'feed' | 'admin' }) {
 
   return (
     <>
-      <header className="sticky top-0 z-40 flex items-center justify-between gap-[18px] min-h-[72px] px-[clamp(16px,4vw,64px)] py-[14px] border-b border-[rgba(23,29,26,0.14)] bg-[rgba(241,241,241,0.92)] text-[#171d1a] backdrop-blur-[18px]">
+      <header className="sticky top-0 z-40 flex items-center justify-between gap-[18px] min-h-[72px] px-[clamp(16px,4vw,64px)] py-[14px] border-b border-[rgba(23,29,26,0.14)] bg-[rgba(241,241,241,0.92)] text-black-grey backdrop-blur-[18px]">
         <LogoMark />
         <nav className="flex items-center gap-[clamp(12px,2vw,26px)] text-[0.82rem] font-bold" aria-label="App navigation">
           {navLink('/', 'Home', 'home')}
@@ -338,9 +338,9 @@ function IconButton({
 }) {
   const base = 'w-[42px] h-[42px] rounded-lg inline-grid place-items-center border';
   const variants = {
-    ghost: 'border-[rgba(241,241,241,0.17)] bg-[rgba(241,241,241,0.08)] text-[#f1f1f1]',
-    dark: 'border-[rgba(241,241,241,0.17)] bg-[rgba(23,29,26,0.72)] text-[#f1f1f1]',
-    yellow: 'border-[rgba(249,216,70,0.7)] bg-[#f9d846] text-[#171d1a]',
+    ghost: 'border-[rgba(241,241,241,0.17)] bg-[rgba(241,241,241,0.08)] text-aventi-white',
+    dark: 'border-[rgba(241,241,241,0.17)] bg-[rgba(23,29,26,0.72)] text-aventi-white',
+    yellow: 'border-[rgba(249,216,70,0.7)] bg-mellow-yellow text-black-grey',
   };
   return (
     <button
@@ -362,7 +362,7 @@ function MarketingHero() {
 
   return (
     <>
-    <section className="relative min-h-[92vh] overflow-hidden bg-[#171d1a] text-[#f1f1f1]" id="top">
+    <section className="relative min-h-[92vh] overflow-hidden bg-black-grey text-aventi-white" id="top">
       <div className="absolute inset-0" aria-hidden="true">
         {heroImages.map((src, index) => (
           <img
@@ -387,7 +387,7 @@ function MarketingHero() {
           <IconButton label="Notifications">
             <Bell size={18} />
           </IconButton>
-          <a className="border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[#f9d846] text-[#171d1a]" href="/feed">
+          <a className="border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-mellow-yellow text-black-grey" href="/feed">
             Open App
           </a>
           <div className="sm:hidden">
@@ -398,18 +398,18 @@ function MarketingHero() {
         </div>
       </header>
       <div className="relative z-[1] w-[min(760px,calc(100%-40px))] px-[clamp(20px,4vw,64px)] pt-[clamp(70px,11vh,132px)] pb-[110px]">
-        <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-[#f9d846]">Connected. Explorative. In flow.</p>
+        <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-mellow-yellow">Connected. Explorative. In flow.</p>
         <h1 className="mt-[10px] mb-[18px] text-[clamp(4.5rem,16vw,12rem)] leading-[0.86] uppercase">Aventi</h1>
         <p className="max-w-[650px] m-0 text-[rgba(241,241,241,0.78)] text-[clamp(1.02rem,1.4vw,1.3rem)] leading-[1.7]">
           A vertical event discovery app for nights out, new neighborhoods, and plans that should feel easy to say yes
           to. Tell Aventi your vibe, then scroll real events that fit your time, radius, budget, and mood.
         </p>
         <div className="flex flex-wrap items-center gap-3 mt-[30px]">
-          <a href="/feed" className="border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[#f9d846] text-[#171d1a]">
+          <a href="/feed" className="border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-mellow-yellow text-black-grey">
             <Play size={18} />
             Explore Events
           </a>
-          <a href="#how-it-works" className="border border-[rgba(241,241,241,0.17)] rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[rgba(241,241,241,0.08)] text-[#f1f1f1]">
+          <a href="#how-it-works" className="border border-[rgba(241,241,241,0.17)] rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[rgba(241,241,241,0.08)] text-aventi-white">
             <Sparkles size={18} />
             How It Works
           </a>
@@ -442,26 +442,26 @@ function MarketingProductSection() {
   const [leadEvent, secondEvent] = demoEvents;
 
   return (
-    <section className="grid grid-cols-[minmax(280px,0.82fr)_minmax(360px,1.18fr)] gap-[clamp(28px,5vw,72px)] items-center px-[clamp(16px,4vw,64px)] py-[clamp(68px,9vw,124px)] bg-[#f1f1f1]" id="product">
+    <section className="grid grid-cols-[minmax(280px,0.82fr)_minmax(360px,1.18fr)] gap-[clamp(28px,5vw,72px)] items-center px-[clamp(16px,4vw,64px)] py-[clamp(68px,9vw,124px)] bg-aventi-white" id="product">
       <div>
-        <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-[#f9d846]">Member product</p>
+        <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-mellow-yellow">Member product</p>
         <h2 className="max-w-[760px] mt-[10px] mb-[18px] text-[clamp(2.5rem,7vw,6.3rem)] leading-[0.96]">Scroll until something feels worth leaving the house for.</h2>
         <p className="text-[rgba(23,29,26,0.62)] leading-[1.75]">
           Aventi brings the mobile feed to web without losing the core interaction: one event at a time, fast preference
           signals, useful details close at hand, and a saved list for plans you actually want to make.
         </p>
         <div className="flex flex-wrap items-center gap-[18px] mt-[28px]">
-          <a className="border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[#f9d846] text-[#171d1a]" href="/feed">
+          <a className="border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-mellow-yellow text-black-grey" href="/feed">
             <Compass size={18} />
             Open Event Feed
           </a>
-          <a className="border-b-2 border-[rgba(25,83,57,0.28)] text-[#195339] font-extrabold" href="#premium">
+          <a className="border-b-2 border-[rgba(25,83,57,0.28)] text-dark-green font-extrabold" href="#premium">
             See Premium
           </a>
         </div>
       </div>
       <div className="relative min-h-[680px] border border-[rgba(23,29,26,0.12)] rounded-lg overflow-hidden bg-[linear-gradient(135deg,rgba(25,83,57,0.92),rgba(58,144,106,0.74)),#195339]" aria-label="Aventi feed preview">
-        <div className="absolute left-[clamp(18px,5vw,70px)] top-1/2 -translate-y-1/2 w-[min(330px,calc(100%-36px))] border-[10px] border-[#111611] rounded-[34px] overflow-hidden bg-[#171d1a] shadow-[0_30px_80px_rgba(0,0,0,0.32)]">
+        <div className="absolute left-[clamp(18px,5vw,70px)] top-1/2 -translate-y-1/2 w-[min(330px,calc(100%-36px))] border-[10px] border-device-bezel rounded-[34px] overflow-hidden bg-black-grey shadow-[0_30px_80px_rgba(0,0,0,0.32)]">
           <div className="flex justify-between px-[18px] pt-[18px] pb-3 text-[rgba(241,241,241,0.68)] text-[0.72rem] font-extrabold tracking-[0.12em] uppercase">
             <span>Aventi</span>
             <span>Tonight</span>
@@ -469,7 +469,7 @@ function MarketingProductSection() {
           <div className="relative min-h-[480px] flex items-end">
             <img src={leadEvent.imageUrl ?? heroImages[0]} alt="" className="object-cover absolute inset-0 w-full h-full" />
             <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent,rgba(23,29,26,0.88))]" />
-            <div className="relative z-[1] px-[18px] pb-[22px] text-[#f1f1f1]">
+            <div className="relative z-[1] px-[18px] pb-[22px] text-aventi-white">
               <span className="text-[0.72rem] font-extrabold tracking-[0.12em] uppercase">{categoryLabels[leadEvent.category]}</span>
               <h3 className="my-2 text-[2.1rem] leading-[0.98] uppercase">{leadEvent.title}</h3>
               <p className="m-0 text-[rgba(241,241,241,0.72)]">
@@ -486,12 +486,12 @@ function MarketingProductSection() {
           </div>
         </div>
         <div className="absolute right-[clamp(18px,5vw,70px)] bottom-[clamp(20px,6vw,76px)] w-[min(380px,calc(100%-36px))] border border-[rgba(241,241,241,0.2)] rounded-lg p-[22px] bg-[rgba(241,241,241,0.9)] shadow-[0_22px_70px_rgba(0,0,0,0.22)]">
-          <span className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-[#3a906a]">Next in queue</span>
+          <span className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-green">Next in queue</span>
           <h3 className="mt-[9px] mb-[10px] text-[clamp(1.35rem,3vw,2.3rem)] leading-[1.05]">{secondEvent.title}</h3>
           <p className="text-[rgba(23,29,26,0.62)] leading-[1.75]">{secondEvent.description}</p>
           <div className="flex flex-wrap gap-2 mt-[18px]">
             {secondEvent.vibes.slice(0, 3).map((vibe) => (
-              <span key={vibe} className="border border-[rgba(23,29,26,0.12)] rounded-lg px-[10px] py-[7px] bg-[rgba(25,83,57,0.08)] text-[#195339] text-[0.76rem] font-bold uppercase">{vibeLabels[vibe]}</span>
+              <span key={vibe} className="border border-[rgba(23,29,26,0.12)] rounded-lg px-[10px] py-[7px] bg-[rgba(25,83,57,0.08)] text-dark-green text-[0.76rem] font-bold uppercase">{vibeLabels[vibe]}</span>
             ))}
           </div>
         </div>
@@ -502,9 +502,9 @@ function MarketingProductSection() {
 
 function MarketingFlowSection() {
   return (
-    <section className="px-[clamp(16px,4vw,64px)] py-[clamp(68px,9vw,124px)] bg-[#e7ece6]" id="how-it-works">
+    <section className="px-[clamp(16px,4vw,64px)] py-[clamp(68px,9vw,124px)] bg-surface-mist" id="how-it-works">
       <div className="w-[min(800px,100%)] mb-[34px]">
-        <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-[#f9d846]">How it works</p>
+        <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-mellow-yellow">How it works</p>
         <h2 className="mt-2 mb-3 text-[clamp(2rem,5vw,4.1rem)] leading-[1.02]">A feed that learns your vibe, then opens up the city.</h2>
       </div>
       <div className="grid grid-cols-3 border-t border-[rgba(23,29,26,0.16)]">
@@ -514,7 +514,7 @@ function MarketingFlowSection() {
           { num: '03', title: 'Build the plan', body: 'Save the standouts, get insider context, add tickets or maps, and keep a short list for the group chat.' },
         ].map((step, i) => (
           <article key={step.num} className={`min-h-[280px] p-[clamp(22px,3vw,38px)] ${i < 2 ? 'border-r border-[rgba(23,29,26,0.16)]' : ''}`}>
-            <span className="text-[0.72rem] font-extrabold tracking-[0.12em] uppercase text-[#3a906a]">{step.num}</span>
+            <span className="text-[0.72rem] font-extrabold tracking-[0.12em] uppercase text-green">{step.num}</span>
             <h3 className="mt-6 mb-[10px] text-[clamp(1.4rem,3vw,2.6rem)] leading-[1.04]">{step.title}</h3>
             <p className="text-[rgba(23,29,26,0.62)] leading-[1.75]">{step.body}</p>
           </article>
@@ -526,9 +526,9 @@ function MarketingFlowSection() {
 
 function MarketingVibeSection() {
   return (
-    <section className="px-[clamp(16px,4vw,64px)] py-[clamp(68px,9vw,124px)] bg-[#f1f1f1]">
+    <section className="px-[clamp(16px,4vw,64px)] py-[clamp(68px,9vw,124px)] bg-aventi-white">
       <div className="w-[min(800px,100%)] mb-[34px]">
-        <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-[#f9d846]">Vibe check</p>
+        <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-mellow-yellow">Vibe check</p>
         <h2 className="mt-2 mb-3 text-[clamp(2rem,5vw,4.1rem)] leading-[1.02]">Not another directory. A shortcut to your kind of night.</h2>
         <p className="max-w-[660px] text-[rgba(23,29,26,0.62)] leading-[1.75]">
           Aventi starts with the signals people actually use when they make plans: location, radius, date, budget,
@@ -543,10 +543,10 @@ function MarketingVibeSection() {
           { icon: <Filter size={22} />, label: 'Budget', value: 'Free to moderate' },
         ].map((item) => (
           <article key={item.label} className="min-h-[230px] border border-[rgba(23,29,26,0.12)] rounded-lg p-[clamp(20px,2.5vw,30px)] flex flex-col justify-between bg-[linear-gradient(180deg,rgba(58,144,106,0.08),transparent),rgba(255,255,255,0.72)]">
-            <div className="text-[#3a906a]">{item.icon}</div>
+            <div className="text-green">{item.icon}</div>
             <div>
               <span className="block text-[rgba(23,29,26,0.5)] text-[0.72rem] font-extrabold tracking-[0.12em] uppercase">{item.label}</span>
-              <strong className="block mt-[10px] text-[#171d1a] text-[clamp(1.15rem,2.5vw,2rem)] leading-[1.08]">{item.value}</strong>
+              <strong className="block mt-[10px] text-black-grey text-[clamp(1.15rem,2.5vw,2rem)] leading-[1.08]">{item.value}</strong>
             </div>
           </article>
         ))}
@@ -559,11 +559,11 @@ function MarketingDetailsSection() {
   const event = demoEvents[2] ?? demoEvents[0];
 
   return (
-    <section className="grid grid-cols-[minmax(420px,1.35fr)_minmax(280px,0.65fr)] gap-4 items-stretch px-[clamp(16px,4vw,64px)] py-[clamp(68px,9vw,124px)] bg-[#dfe8dd]">
+    <section className="grid grid-cols-[minmax(420px,1.35fr)_minmax(280px,0.65fr)] gap-4 items-stretch px-[clamp(16px,4vw,64px)] py-[clamp(68px,9vw,124px)] bg-surface-sage">
       <div className="border border-[rgba(23,29,26,0.12)] rounded-lg bg-[rgba(255,255,255,0.52)] shadow-[0_24px_70px_rgba(23,29,26,0.2)] grid grid-cols-[minmax(260px,0.85fr)_minmax(320px,1.15fr)] overflow-hidden">
         <img src={event.imageUrl ?? heroImages[2]} alt="" className="w-full h-full min-h-[520px] object-cover" />
         <div className="p-[clamp(26px,5vw,58px)] flex flex-col justify-center">
-          <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-[#f9d846]">Event details</p>
+          <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-mellow-yellow">Event details</p>
           <h2 className="mt-[10px] mb-[18px] text-[clamp(2.4rem,6vw,5.6rem)] leading-[0.96]">Every card can become a plan.</h2>
           <p className="text-[rgba(23,29,26,0.62)] leading-[1.75]">
             Open an event for the summary, vibe breakdown, date and distance, map context, shareable details, and the
@@ -576,7 +576,7 @@ function MarketingDetailsSection() {
               { icon: <CalendarDays size={16} />, label: 'Calendar' },
               { icon: <MapPin size={16} />, label: 'Maps' },
             ].map((item) => (
-              <span key={item.label} className="min-h-[38px] border border-[rgba(23,29,26,0.12)] rounded-lg px-[10px] py-2 inline-flex items-center gap-2 bg-[rgba(255,255,255,0.58)] text-[#195339] text-[0.78rem] font-extrabold uppercase">
+              <span key={item.label} className="min-h-[38px] border border-[rgba(23,29,26,0.12)] rounded-lg px-[10px] py-2 inline-flex items-center gap-2 bg-[rgba(255,255,255,0.58)] text-dark-green text-[0.78rem] font-extrabold uppercase">
                 {item.icon}
                 {item.label}
               </span>
@@ -588,7 +588,7 @@ function MarketingDetailsSection() {
         className="border border-[rgba(23,29,26,0.12)] rounded-lg shadow-[0_24px_70px_rgba(23,29,26,0.2)] p-[clamp(24px,4vw,38px)] flex flex-col justify-end bg-[linear-gradient(180deg,rgba(249,216,70,0.34),rgba(255,255,255,0.54)),rgba(255,255,255,0.54)]"
         aria-label="Premium insight preview"
       >
-        <span className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-[#3a906a]">Premium insight</span>
+        <span className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-green">Premium insight</span>
         <h3 className="my-3 text-[clamp(1.8rem,4vw,3.7rem)] leading-[0.98]">Why it matches</h3>
         <p className="text-[rgba(23,29,26,0.66)] leading-[1.7]">
           Fits your artsy, after-work, under-$40 pattern. Pair it with a quiet dinner nearby and save the later jazz set
@@ -596,7 +596,7 @@ function MarketingDetailsSection() {
         </p>
         <div className="flex flex-wrap gap-[10px] mt-[26px]">
           {['AI match', 'Insider tip', 'Complete the night'].map((tag) => (
-            <span key={tag} className="min-h-[38px] border border-[rgba(23,29,26,0.12)] rounded-lg px-[10px] py-2 inline-flex items-center gap-2 bg-[rgba(255,255,255,0.58)] text-[#195339] text-[0.78rem] font-extrabold uppercase">
+            <span key={tag} className="min-h-[38px] border border-[rgba(23,29,26,0.12)] rounded-lg px-[10px] py-2 inline-flex items-center gap-2 bg-[rgba(255,255,255,0.58)] text-dark-green text-[0.78rem] font-extrabold uppercase">
               {tag}
             </span>
           ))}
@@ -608,15 +608,15 @@ function MarketingDetailsSection() {
 
 function MarketingBeyondSection() {
   return (
-    <section className="grid grid-cols-[minmax(320px,0.9fr)_minmax(360px,1.1fr)] gap-[clamp(28px,5vw,72px)] items-center px-[clamp(16px,4vw,64px)] py-[clamp(68px,9vw,124px)] bg-[#171d1a] text-[#f1f1f1]">
+    <section className="grid grid-cols-[minmax(320px,0.9fr)_minmax(360px,1.1fr)] gap-[clamp(28px,5vw,72px)] items-center px-[clamp(16px,4vw,64px)] py-[clamp(68px,9vw,124px)] bg-black-grey text-aventi-white">
       <div>
-        <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-[#f9d846]">Beyond discovery</p>
+        <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-mellow-yellow">Beyond discovery</p>
         <h2 className="max-w-[760px] mt-[10px] mb-[18px] text-[clamp(2.5rem,7vw,6.3rem)] leading-[0.96]">From what is happening? to we are going.</h2>
         <p className="text-[rgba(241,241,241,0.58)] leading-[1.75]">
           Aventi is built around the moment after discovery too: saved events, smarter calendars, friend-ready sharing,
           travel mode, and complete-the-night ideas that turn one good event into a real plan.
         </p>
-        <a className="mt-4 inline-flex border border-[rgba(241,241,241,0.17)] rounded-lg items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[rgba(241,241,241,0.08)] text-[#f1f1f1]" href="/feed">
+        <a className="mt-4 inline-flex border border-[rgba(241,241,241,0.17)] rounded-lg items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[rgba(241,241,241,0.08)] text-aventi-white" href="/feed">
           <Compass size={18} />
           Try The Feed
         </a>
@@ -629,7 +629,7 @@ function MarketingBeyondSection() {
           { icon: <Sparkles size={22} />, label: 'AI night builder', value: 'Dinner, show, after-hours, all in one flow' },
         ].map((row, i) => (
           <div key={row.label} className={`grid grid-cols-[auto_1fr] gap-4 items-start py-[22px] ${i > 0 ? 'border-t border-[rgba(241,241,241,0.12)]' : ''}`}>
-            <div className="text-[#f9d846]">{row.icon}</div>
+            <div className="text-mellow-yellow">{row.icon}</div>
             <div>
               <span className="block mb-[6px] text-[rgba(241,241,241,0.58)] text-[0.72rem] font-extrabold tracking-[0.12em] uppercase">{row.label}</span>
               <strong className="block text-[clamp(1.1rem,2.4vw,1.8rem)] leading-[1.12]">{row.value}</strong>
@@ -654,9 +654,9 @@ function FilterRail({
 }) {
   const chipBase = 'border rounded-lg inline-flex items-center gap-[7px] min-h-[34px] px-[10px] text-[0.72rem] font-bold tracking-[0.16em] uppercase bg-transparent';
   const chipDefault = 'border-[rgba(23,29,26,0.14)] text-[rgba(23,29,26,0.72)]';
-  const chipActive = 'border-[#3a906a] bg-[rgba(58,144,106,0.12)] text-[#195339]';
+  const chipActive = 'border-green bg-[rgba(58,144,106,0.12)] text-dark-green';
   const chipYellow = 'border-[rgba(249,216,70,0.9)] bg-[rgba(249,216,70,0.35)]';
-  const chipStrong = 'border-[rgba(23,29,26,0.14)] bg-[#171d1a] text-[#f1f1f1]';
+  const chipStrong = 'border-[rgba(23,29,26,0.14)] bg-black-grey text-aventi-white';
 
   return (
     <div className="flex flex-wrap gap-2 my-[18px]" aria-label="Feed filters">
@@ -711,7 +711,7 @@ function EventPoster({
 }) {
   return (
     <article
-      className={`relative min-h-[min(720px,calc(100vh-130px))] mb-4 overflow-hidden rounded-lg scroll-snap-align-start bg-[#171d1a] text-[#f1f1f1] ${action === 'like' ? 'outline outline-[3px] outline-[rgba(249,216,70,0.7)]' : ''}`}
+      className={`relative min-h-[min(720px,calc(100vh-130px))] mb-4 overflow-hidden rounded-lg scroll-snap-align-start bg-black-grey text-aventi-white ${action === 'like' ? 'outline outline-[3px] outline-[rgba(249,216,70,0.7)]' : ''}`}
     >
       <img src={event.imageUrl ?? heroImages[0]} alt="" className="object-cover absolute inset-0 w-full h-full" />
       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(23,29,26,0.24),rgba(23,29,26,0.88)),linear-gradient(90deg,rgba(23,29,26,0.7),transparent_62%)]" />
@@ -823,7 +823,7 @@ export function EventFeedPage() {
               onToggleVibe={toggleVibe}
               onSetDate={(date) => setFilters((current) => ({ ...current, date }))}
             />
-            <div className="border border-[rgba(23,29,26,0.14)] rounded-lg p-4 bg-[#195339] text-[#f1f1f1]">
+            <div className="border border-[rgba(23,29,26,0.14)] rounded-lg p-4 bg-dark-green text-aventi-white">
               <div className="grid place-items-center w-[38px] h-[38px] mb-[14px] rounded-lg bg-[rgba(241,241,241,0.12)]">
                 <Sparkles size={20} />
               </div>
@@ -836,7 +836,7 @@ export function EventFeedPage() {
               <button
                 type="button"
                 onClick={refreshFeed}
-                className="border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[#f9d846] text-[#171d1a]"
+                className="border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-mellow-yellow text-black-grey"
               >
                 <RefreshCcw size={16} />
                 Refresh
@@ -862,7 +862,7 @@ export function EventFeedPage() {
                 <button
                   type="button"
                   onClick={refreshFeed}
-                  className="border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[#f9d846] text-[#171d1a]"
+                  className="border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-mellow-yellow text-black-grey"
                 >
                   Mine More Events
                 </button>
@@ -876,7 +876,7 @@ export function EventFeedPage() {
           <aside className="sticky top-[84px] border border-[rgba(23,29,26,0.14)] rounded-lg bg-[rgba(255,255,255,0.48)] shadow-[0_24px_70px_rgba(23,29,26,0.2)] p-[18px]">
             {selectedEvent ? (
               <>
-                <span className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-[#3a906a]">Selected Event</span>
+                <span className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-green">Selected Event</span>
                 <h3 className="mt-2 mb-3 text-[1.6rem] leading-[1.12]">{selectedEvent.title}</h3>
                 <p className="leading-[1.65] text-[rgba(23,29,26,0.62)]">{selectedEvent.description}</p>
                 <dl className="grid gap-3 my-[22px]">
@@ -891,7 +891,7 @@ export function EventFeedPage() {
                     </div>
                   ))}
                 </dl>
-                <button className="w-full border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[#f9d846] text-[#171d1a]" type="button">
+                <button className="w-full border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-mellow-yellow text-black-grey" type="button">
                   <CalendarDays size={17} />
                   Get Tickets
                 </button>
@@ -941,16 +941,16 @@ export function AdminPortalPage() {
   }, [auth.isReady]);
 
   const tabBtn = (tab: 'markets' | 'scans') =>
-    `border-0 rounded-[6px] inline-flex items-center gap-2 min-h-[38px] px-[14px] font-bold ${activeTab === tab ? 'bg-[#f9d846] text-[#171d1a]' : 'bg-transparent text-[#f1f1f1]'}`;
+    `border-0 rounded-[6px] inline-flex items-center gap-2 min-h-[38px] px-[14px] font-bold ${activeTab === tab ? 'bg-mellow-yellow text-black-grey' : 'bg-transparent text-aventi-white'}`;
 
   const authBox = 'border border-[rgba(241,241,241,0.17)] rounded-lg bg-[rgba(241,241,241,0.06)]';
 
   return (
     <>
       <AppHeader active="admin" />
-      <section className="min-h-[calc(100vh-72px)] px-[clamp(16px,4vw,64px)] py-[clamp(62px,8vw,110px)] bg-[#171d1a] text-[#f1f1f1]" id="admin">
+      <section className="min-h-[calc(100vh-72px)] px-[clamp(16px,4vw,64px)] py-[clamp(62px,8vw,110px)] bg-black-grey text-aventi-white" id="admin">
         <div className="w-[min(800px,100%)] mb-[34px]">
-          <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-[#f9d846]">Admin portal</p>
+          <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-mellow-yellow">Admin portal</p>
           <h2 className="mt-2 mb-3 text-[clamp(2rem,5vw,4.1rem)] leading-[1.02]">Backend market scans, visible at a glance.</h2>
           <p className="max-w-[660px] text-[rgba(241,241,241,0.58)] leading-[1.75]">
             Operational views for heat tiers, inventory status, worker activity, ingest performance, and verification
@@ -981,7 +981,7 @@ export function AdminPortalPage() {
                   type="button"
                   onClick={() => loadDashboard()}
                   disabled={isLoading}
-                  className="border border-[rgba(241,241,241,0.17)] rounded-lg inline-flex items-center justify-center gap-2 min-h-[36px] px-[14px] bg-[rgba(241,241,241,0.08)] text-[#f1f1f1] font-extrabold disabled:opacity-55"
+                  className="border border-[rgba(241,241,241,0.17)] rounded-lg inline-flex items-center justify-center gap-2 min-h-[36px] px-[14px] bg-[rgba(241,241,241,0.08)] text-aventi-white font-extrabold disabled:opacity-55"
                 >
                   <RefreshCcw size={15} />
                   Refresh
@@ -989,7 +989,7 @@ export function AdminPortalPage() {
                 <button
                   type="button"
                   onClick={() => auth.signOut()}
-                  className="border border-[rgba(241,241,241,0.17)] rounded-lg inline-flex items-center justify-center gap-2 min-h-[36px] px-[14px] bg-[rgba(241,241,241,0.08)] text-[#f1f1f1] font-extrabold"
+                  className="border border-[rgba(241,241,241,0.17)] rounded-lg inline-flex items-center justify-center gap-2 min-h-[36px] px-[14px] bg-[rgba(241,241,241,0.08)] text-aventi-white font-extrabold"
                 >
                   <LogOut size={15} />
                   Sign Out
@@ -1033,9 +1033,9 @@ export function AdminPortalPage() {
                       {dashboard.markets.map((market) => {
                         const status = marketStatus(market);
                         const statusColor =
-                          status === 'ready' ? 'bg-[rgba(58,144,106,0.32)] text-[#f1f1f1]' :
-                          status === 'warming' || status === 'targeted_warming' ? 'bg-[rgba(249,216,70,0.2)] text-[#f9d846]' :
-                          'bg-[rgba(241,241,241,0.1)] text-[#f1f1f1]';
+                          status === 'ready' ? 'bg-[rgba(58,144,106,0.32)] text-aventi-white' :
+                          status === 'warming' || status === 'targeted_warming' ? 'bg-[rgba(249,216,70,0.2)] text-mellow-yellow' :
+                          'bg-[rgba(241,241,241,0.1)] text-aventi-white';
                         return (
                           <div className="grid grid-cols-[1.3fr_1fr_0.7fr_1fr_1.1fr_0.7fr] gap-4 min-w-[860px] px-4 py-[15px] items-center border-t border-[rgba(241,241,241,0.12)]" role="row" key={market.marketKey}>
                             <span>
@@ -1055,13 +1055,13 @@ export function AdminPortalPage() {
                     <div className="grid gap-[10px]">
                       {dashboard.ingestRuns.map((run) => {
                         const runColor =
-                          run.status === 'succeeded' ? 'bg-[rgba(58,144,106,0.32)] text-[#f1f1f1]' :
-                          run.status === 'running' || run.status === 'queued' || run.status === 'completed' ? 'bg-[rgba(249,216,70,0.2)] text-[#f9d846]' :
-                          'bg-[rgba(241,241,241,0.1)] text-[#f1f1f1]';
+                          run.status === 'succeeded' ? 'bg-[rgba(58,144,106,0.32)] text-aventi-white' :
+                          run.status === 'running' || run.status === 'queued' || run.status === 'completed' ? 'bg-[rgba(249,216,70,0.2)] text-mellow-yellow' :
+                          'bg-[rgba(241,241,241,0.1)] text-aventi-white';
                         return (
                           <article className="grid grid-cols-[minmax(220px,1fr)_minmax(280px,1.3fr)_auto] gap-4 items-center p-4 border border-[rgba(241,241,241,0.17)] rounded-lg bg-[rgba(241,241,241,0.06)]" key={run.id}>
                             <div>
-                              <span className="text-[#f9d846] text-[0.76rem] font-extrabold uppercase">{run.id.slice(0, 12)}</span>
+                              <span className="text-mellow-yellow text-[0.76rem] font-extrabold uppercase">{run.id.slice(0, 12)}</span>
                               <h4 className="my-[5px] text-[1.04rem]">{run.city ?? 'Unknown market'} - {run.sourceType ?? 'source'}</h4>
                               <p className="text-[rgba(241,241,241,0.58)]">{run.sourceName ?? 'ingest'} started {formatDateTime(run.startedAt)}</p>
                             </div>
@@ -1076,7 +1076,7 @@ export function AdminPortalPage() {
                       })}
                       <article className="grid grid-cols-[minmax(220px,1fr)_minmax(280px,1.3fr)_auto] gap-4 items-center p-4 border border-[rgba(241,241,241,0.17)] rounded-lg bg-[rgba(241,241,241,0.06)]">
                         <div>
-                          <span className="text-[#f9d846] text-[0.76rem] font-extrabold uppercase">verification</span>
+                          <span className="text-mellow-yellow text-[0.76rem] font-extrabold uppercase">verification</span>
                           <h4 className="my-[5px] text-[1.04rem]">Verification health</h4>
                           <p className="text-[rgba(241,241,241,0.58)]">{dashboard.workerQueue.configured ? 'Worker queue configured' : 'Worker queue not configured'}</p>
                         </div>
@@ -1104,7 +1104,7 @@ function PricingSection() {
   return (
     <section className="px-[clamp(16px,4vw,64px)] py-[clamp(62px,8vw,110px)]" id="premium">
       <div className="w-[min(800px,100%)] mb-[34px]">
-        <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-[#f9d846]">Aventi Premium</p>
+        <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-mellow-yellow">Aventi Premium</p>
         <h2 className="mt-2 mb-3 text-[clamp(2rem,5vw,4.1rem)] leading-[1.02]">Start free. Upgrade when you want the whole city.</h2>
       </div>
       <div className="grid grid-cols-2 gap-4">
@@ -1130,10 +1130,10 @@ function PricingSection() {
             <p className="text-[rgba(23,29,26,0.62)] leading-[1.7]">{plan.desc}</p>
             <ul className="grid gap-[10px] mt-[18px] p-0 list-none">
               {plan.features.map((f) => (
-                <li key={f} className="relative pl-6 text-[rgba(23,29,26,0.66)] leading-[1.55] before:absolute before:left-0 before:top-[0.45em] before:w-2 before:h-2 before:rounded-full before:bg-[#3a906a] before:content-['']">{f}</li>
+                <li key={f} className="relative pl-6 text-[rgba(23,29,26,0.66)] leading-[1.55] before:absolute before:left-0 before:top-[0.45em] before:w-2 before:h-2 before:rounded-full before:bg-green before:content-['']">{f}</li>
               ))}
             </ul>
-            <a href="/feed" className="mt-[14px] border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[#f9d846] text-[#171d1a]">{plan.cta}</a>
+            <a href="/feed" className="mt-[14px] border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-mellow-yellow text-black-grey">{plan.cta}</a>
           </article>
         ))}
       </div>
