@@ -9,11 +9,11 @@ uv run --project services/backend python -m aventi_backend.main
 uv run --project services/backend python -m aventi_backend.worker.main
 ```
 
+Configure `.env` from `.env.example`. Job enqueue and the worker both require a reachable **`SQS_WORKER_QUEUE_URL`** (LocalStack is typical for local dev). See repository **`docs/backend_architecture.md`** for queue and worker context.
+
 ## Manual ingest (real event files)
 
-Import JSON, NDJSON, or CSV event rows directly into Supabase via the backend ingest service.
-
-See the full guide: `/Users/ericswanson/code/gitHub/aventi/docs/manual-ingest-cli.md`
+Import JSON, NDJSON, or CSV event rows directly into Postgres via the backend ingest service.
 
 ```bash
 AVENTI_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:54332/postgres \
@@ -28,8 +28,8 @@ CSV supports common columns like `title`, `booking_url`, `starts_at`, `category`
 
 ## Event Discovery and Feed Algorithm (Current Implementation)
 
-The backend uses a job-driven ingest pipeline. Today this is source-adapter based
-(`json`, `rss`, `mock`) rather than a full browser/LLM crawler.
+The backend uses a job-driven ingest pipeline. Discovery is **source-adapter based**
+(JSON/RSS/SerpAPI/Gemini/mock), not a browser crawler.
 
 ### 1) Event entry points
 
@@ -44,25 +44,32 @@ Events can enter the system through:
 
 ### 2) Job processing and discovery
 
-The worker continuously:
+**Enqueue:** `JobQueueRepository.enqueue_job` sends a JSON message to **AWS SQS** (`SQS_WORKER_QUEUE_URL` via Boto3). Local development often uses LocalStack; the worker can auto-create the queue in dev if it is missing.
 
-1. Claims due jobs from `job_queue` with row locking (`FOR UPDATE SKIP LOCKED`).
-2. Marks jobs `running` and writes `job_runs`.
-3. Processes by type:
-   - `CITY_SCAN`: discover candidates and ingest them.
-   - `VERIFY_EVENT`: verify one event.
-   - `ENRICH_EVENT` / `GENERATE_IMAGE`: currently stubbed (`skipped`).
-4. Marks complete, or marks failed with retry backoff until `max_attempts`.
+**Worker:** Long-polls SQS (`receive_message`), runs `process_job` in `worker/handlers.py`, and **deletes the message on success**. On failure, the message becomes visible again after the visibility timeout (SQS redelivery).
 
-For `CITY_SCAN`, source selection is payload-driven:
+**Job types:**
 
-- `sourceType=json` (or aliases): pulls structured JSON
-- `sourceType=rss` (or aliases): pulls/parses RSS
-- default: `mock`
+| Type | Role |
+|------|------|
+| `MARKET_WARMUP` | Warmup orchestration for a market (structured sources + optional SerpAPI discovery scans). |
+| `MARKET_SCAN` | Run `execute_market_scan`: discover candidates for a city/market, then `ManualIngestService.ingest_manual`. |
+| `VERIFY_EVENT` | Verify one event (booking URL, etc.). |
+| `ENRICH_EVENT` | Enrich description-derived metadata via Gemini when payload qualifies. |
+| `GENERATE_IMAGE` | Build a Pollinations image URL, download the rendered image, upload to **Supabase Storage** (`event-images`), update `events.image_url`. |
+
+For **`MARKET_SCAN`**, scraper selection is payload-driven (`build_market_scan_scraper`):
+
+- `sourceType=json` (aliases: `structured-json`, `json-feed`): structured JSON
+- `sourceType=rss` (aliases: `rss-feed`): RSS
+- `sourceType=serpapi` or `google-events`: **SerpApi** Google Events API (`SerpApiEventScraper`; requires `SERPAPI_API_KEY`)
+- `sourceType=gemini` or `ai`: Gemini-backed scraper
+- Default: **`mock`** (deterministic test candidates)
 
 Each discovery candidate is normalized to a manual ingest payload with defaults
 (for example fallback category, fallback venue, fallback times), then sent through
-the same ingest service as CLI/manual ingest.
+the same ingest service as CLI/manual ingest. Ingest may enqueue **`GENERATE_IMAGE`**
+when `should_generate_main_image` applies (for example replaceable SerpAPI thumbnails).
 
 ### 3) Ingest normalization + dedupe
 
@@ -79,11 +86,7 @@ After ingest, verification jobs are typically enqueued for the affected event ID
 
 ### 4) Verification stage
 
-`VERIFY_EVENT` currently uses `MockVerifier`:
-
-- Event is considered active if `booking_url` starts with `https://`.
-- Writes a row to `verification_runs`.
-- If inactive, marks event `hidden=true`.
+`VERIFY_EVENT` behavior depends on configured providers; the codebase includes patterns such as **`MockVerifier`** (e.g. treat `https://` booking URLs as active). Writes verification runs and can hide inactive events.
 
 ### 5) Feed assembly for users
 

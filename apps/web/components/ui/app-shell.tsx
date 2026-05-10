@@ -54,7 +54,7 @@ function DownloadAppBanner({ onDismiss }: { onDismiss: () => void }) {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <a
-            href="#get-app"
+            href="/profile"
             className={`${motion.base} inline-flex items-center h-9 px-4 rounded-full text-[0.8125rem] font-semibold text-white [background:var(--gradient-premium)] hover:brightness-110 active:scale-[0.98]`}
           >
             Get App
@@ -218,15 +218,14 @@ export function AppShell({ active, chromeless = false, children }: AppShellProps
       {!chromeless && <LeftNavRail active={active} topOffset={bannerHeight} />}
 
       <main
-        className={motion.base}
+        className={`${motion.base} ${chromeless ? '' : 'pb-[84px] md:pb-0'}`}
         style={{
           paddingTop: `${bannerHeight}px`,
           paddingLeft: chromeless ? 0 : undefined,
-          paddingBottom: chromeless ? 0 : 84, // reserve for mobile tab bar (overridden md+ via class below)
           minHeight: '100vh',
         }}
       >
-        <div className={chromeless ? '' : 'md:pl-[84px] md:pb-0'}>{children}</div>
+        <div className={chromeless ? '' : 'md:pl-[84px]'}>{children}</div>
       </main>
 
       {!chromeless && <BottomTabBar active={active} />}

@@ -2,10 +2,11 @@ import asyncio
 import socket
 import json
 from datetime import UTC, datetime
+from typing import NoReturn
 from urllib.parse import urlparse
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, EndpointConnectionError
 
 import structlog
 from watchfiles import run_process
@@ -18,6 +19,31 @@ from aventi_backend.services.jobs import JobRecord, JobType
 from aventi_backend.worker.handlers import process_job
 
 logger = structlog.get_logger(__name__)
+
+
+def _sqs_unreachable_hint(settings: Settings) -> str:
+    ep = (settings.aws_endpoint_url or "").lower()
+    if "localhost" in ep or "127.0.0.1" in ep or ":4566" in ep:
+        return (
+            "Nothing is accepting connections at AWS_ENDPOINT_URL — "
+            "start LocalStack (or your local AWS emulator) so SQS is available, "
+            "then retry. See services/backend/.env.example and README.md."
+        )
+    return (
+        "SQS endpoint is not reachable. Check AWS_ENDPOINT_URL, network/VPN, "
+        "and that the queue URL matches your environment."
+    )
+
+
+def _exit_sqs_unreachable(settings: Settings, exc: EndpointConnectionError) -> NoReturn:
+    logger.error(
+        "worker.sqs_unreachable",
+        aws_endpoint_url=settings.aws_endpoint_url,
+        sqs_worker_queue_url=settings.sqs_worker_queue_url,
+        hint=_sqs_unreachable_hint(settings),
+        error=str(exc),
+    )
+    raise SystemExit(1)
 
 
 def _extract_queue_name_from_url(queue_url: str) -> str:
@@ -49,6 +75,8 @@ async def _ensure_queue_exists(settings: Settings) -> boto3.client:
             AttributeNames=["QueueArn"],
         )
         logger.debug("worker.queue.exists", queue_url=settings.sqs_worker_queue_url)
+    except EndpointConnectionError as exc:
+        _exit_sqs_unreachable(settings, exc)
     except ClientError as exc:
         error_code = exc.response.get("Error", {}).get("Code", "Unknown")
         if error_code == "AWS.SimpleQueueService.NonExistentQueue":
@@ -69,6 +97,8 @@ async def _ensure_queue_exists(settings: Settings) -> boto3.client:
                     QueueName=queue_name,
                 )
                 logger.info("worker.queue.created", queue_name=queue_name)
+            except EndpointConnectionError as exc:
+                _exit_sqs_unreachable(settings, exc)
             except ClientError as create_exc:
                 logger.error("worker.queue.create_failed", queue_name=queue_name, error=str(create_exc))
                 raise
@@ -178,6 +208,14 @@ async def worker_loop() -> None:
 
             except RuntimeError as exc:
                 logger.error("worker.misconfigured", error=str(exc))
+                await asyncio.sleep(settings.worker_poll_seconds)
+            except EndpointConnectionError as exc:
+                logger.error(
+                    "worker.sqs_unreachable",
+                    aws_endpoint_url=settings.aws_endpoint_url,
+                    hint=_sqs_unreachable_hint(settings),
+                    error=str(exc),
+                )
                 await asyncio.sleep(settings.worker_poll_seconds)
             except Exception as exc:  # noqa: BLE001
                 if isinstance(exc, asyncio.CancelledError):

@@ -31,7 +31,7 @@ export const glass = {
 
 // Motion class string — apply on any interactive surface.
 export const motion = {
-  base: 'transition-[background-color,border-color,color,opacity,transform,box-shadow] duration-[var(--dur-base)] ease-[var(--ease-out)]',
+  base: 'transition-[background-color,border-color,color,opacity,transform,box-shadow,width] duration-[var(--dur-base)] ease-[var(--ease-out)]',
   fast: 'transition-[background-color,border-color,color,opacity,transform] duration-[var(--dur-fast)] ease-[var(--ease-out)]',
 };
 
