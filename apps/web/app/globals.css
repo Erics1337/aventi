@@ -1,6 +1,7 @@
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800&display=swap');
 @import "tailwindcss";
 
+/* Aventi Style Guide v1 — shared with @aventi/design-tokens */
 @theme {
   --color-aventi-white: #f1f1f1;
   --color-black-grey: #171d1a;
@@ -8,7 +9,37 @@
   --color-green: #3a906a;
   --color-mellow-yellow: #f9d846;
 
-  --font-sans: Poppins, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --color-brand-paper: var(--color-aventi-white);
+  --color-brand-ink: var(--color-black-grey);
+  --color-brand-accent: var(--color-mellow-yellow);
+  --color-brand-primary: var(--color-dark-green);
+  --color-brand-secondary: var(--color-green);
+
+  --color-surface-mist: #e7ece6;
+  --color-surface-sage: #dfe8dd;
+  --color-device-bezel: #111611;
+
+  --font-sans: Poppins, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  --text-display: 4.44rem;
+  --text-display--line-height: 1.06;
+  --text-display--font-weight: 600;
+
+  --text-product: 2.89rem;
+  --text-product--line-height: 1.12;
+  --text-product--font-weight: 600;
+
+  --text-subhead: 1.89rem;
+  --text-subhead--line-height: 1.2;
+  --text-subhead--font-weight: 600;
+
+  --text-overline: 1rem;
+  --text-overline--line-height: 1.45;
+  --text-overline--font-weight: 700;
+  --text-overline--letter-spacing: 0.16em;
+
+  --radius-aventi-card: 28px;
+  --radius-aventi-panel: 16px;
 }
 
 *,
@@ -23,9 +54,9 @@ html {
 
 body {
   margin: 0;
-  background: #f1f1f1;
-  color: #171d1a;
-  font-family: Poppins, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background-color: var(--color-aventi-white);
+  color: var(--color-black-grey);
+  font-family: var(--font-sans);
 }
 
 button,

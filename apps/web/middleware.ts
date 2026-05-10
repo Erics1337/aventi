@@ -1,12 +1,10 @@
+import { createServerClient } from '@supabase/ssr';
 import { type NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+
+import { isAdminUser } from './lib/admin-access';
 
 export async function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-
-  if (!pathname.startsWith('/admin')) {
-    return NextResponse.next();
-  }
+  let response = NextResponse.next({ request });
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -15,11 +13,22 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/', request.url));
   }
 
-  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-    auth: { persistSession: false },
-    global: {
-      headers: {
-        cookie: request.headers.get('cookie') ?? '',
+  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
+      },
+      setAll(cookiesToSet, headers) {
+        cookiesToSet.forEach(({ name, value }) => {
+          request.cookies.set(name, value);
+        });
+        response = NextResponse.next({ request });
+        cookiesToSet.forEach(({ name, value, options }) => {
+          response.cookies.set(name, value, options);
+        });
+        Object.entries(headers).forEach(([key, value]) => {
+          response.headers.set(key, value);
+        });
       },
     },
   });
@@ -38,18 +47,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/', request.url));
   }
 
-  const meta = user.app_metadata ?? {};
-  const role: string = meta.role ?? '';
-  const roles: string[] = meta.roles ?? [];
-  const isAdmin =
-    role === 'admin' || role === 'aventi_admin' || role === 'owner' ||
-    roles.includes('admin') || roles.includes('aventi_admin') || roles.includes('owner');
-
-  if (!isAdmin) {
+  if (!isAdminUser(user)) {
     return NextResponse.redirect(new URL('/', request.url));
   }
 
-  return NextResponse.next();
+  return response;
 }
 
 export const config = {

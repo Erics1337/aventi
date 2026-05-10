@@ -53,6 +53,28 @@ import { AuthModal } from './AuthModal';
 const categoryOptions: EventCategory[] = ['nightlife', 'dining', 'concerts', 'experiences', 'wellness'];
 const vibeOptions: EventVibeTag[] = ['social', 'live-music', 'romantic', 'wellness', 'late-night', 'intellectual'];
 
+/** Marketing layout + surfaces — tied to `app/globals.css` @theme tokens. */
+const ds = {
+  wrap: 'mx-auto w-full max-w-[min(1200px,calc(100%-32px))]',
+  section: 'px-[clamp(16px,4vw,72px)] py-[clamp(72px,11vw,132px)]',
+  eyebrow: 'text-[0.72rem] font-bold uppercase tracking-[0.16em] text-mellow-yellow',
+  h2: 'font-semibold tracking-tight text-black-grey text-[clamp(1.85rem,4vw,2.89rem)] leading-[1.1]',
+  h2OnDark: 'font-semibold tracking-tight text-aventi-white text-[clamp(1.85rem,4vw,2.89rem)] leading-[1.1]',
+  bodyMuted: 'text-[rgba(23,29,26,0.62)] leading-[1.75]',
+  bodyOnDark: 'text-[rgba(241,241,241,0.78)] leading-[1.75]',
+  heroOverlay:
+    'absolute inset-0 bg-[linear-gradient(135deg,rgba(25,83,57,0.38),transparent_42%),linear-gradient(90deg,rgba(23,29,26,0.94),rgba(23,29,26,0.56)_52%,rgba(23,29,26,0.2)),linear-gradient(0deg,rgba(23,29,26,0.68),transparent_44%)]',
+  statsStrip:
+    'rounded-aventi-panel border border-aventi-white/18 bg-[rgba(23,29,26,0.78)] backdrop-blur-xl shadow-[0_28px_90px_rgba(0,0,0,0.38)] overflow-hidden',
+  card: 'rounded-aventi-panel border border-black-grey/12 bg-white/60 shadow-[0_24px_70px_-14px_rgba(23,29,26,0.2)]',
+  cardMuted: 'rounded-aventi-panel border border-black-grey/10 bg-white/45 backdrop-blur-sm',
+  btnPrimary:
+    'border-0 rounded-lg inline-flex items-center justify-center gap-2.5 min-h-11 px-5 font-bold bg-mellow-yellow text-black-grey transition-[opacity,transform] hover:opacity-95 active:scale-[0.99]',
+  btnGhostOnDark:
+    'border border-aventi-white/18 rounded-lg inline-flex items-center justify-center gap-2.5 min-h-11 px-5 font-bold bg-aventi-white/10 text-aventi-white hover:bg-aventi-white/14 transition-colors',
+  linkAccent: 'border-b-2 border-dark-green/35 text-dark-green font-bold hover:border-dark-green transition-colors',
+} as const;
+
 function formatDateTime(value?: string | null) {
   if (!value) return 'Not recorded';
   return new Intl.DateTimeFormat(undefined, {
@@ -104,7 +126,7 @@ function NavMenu({
 }: {
   open: boolean;
   onClose: () => void;
-  active?: 'home' | 'feed' | 'admin';
+  active?: 'feed' | 'admin';
   theme?: 'light' | 'dark';
 }) {
   const auth = useAuthSession();
@@ -140,7 +162,6 @@ function NavMenu({
   const metaText = isDark ? 'text-[rgba(241,241,241,0.44)]' : 'text-[rgba(23,29,26,0.44)]';
 
   const navItems: { href: string; label: string; icon: React.ReactNode; key: string }[] = [
-    { href: '/',       label: 'Home',         icon: <Compass size={18} />,     key: 'home' },
     { href: '/feed',   label: 'Event Feed',   icon: <Sparkles size={18} />,    key: 'feed' },
     ...(auth.isAdmin
       ? [{ href: '/admin', label: 'Admin Portal', icon: <ShieldCheck size={18} />, key: 'admin' }]
@@ -188,7 +209,7 @@ function NavMenu({
         {/* Get App CTA */}
         <div className="px-3 py-4">
           <a
-            href="#get-app"
+            href="#premium"
             className="flex items-center gap-3 rounded-lg px-4 py-3 font-bold bg-mellow-yellow text-black-grey"
             onClick={onClose}
           >
@@ -231,7 +252,7 @@ function NavMenu({
   );
 }
 
-function AppHeader({ active }: { active: 'home' | 'feed' | 'admin' }) {
+function AppHeader({ active }: { active?: 'feed' | 'admin' }) {
   const auth = useAuthSession();
   const [mounted, setMounted] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -240,7 +261,7 @@ function AppHeader({ active }: { active: 'home' | 'feed' | 'admin' }) {
     setMounted(true);
   }, []);
 
-  const navLink = (href: string, label: string, key: 'home' | 'feed' | 'admin') => (
+  const navLink = (href: string, label: string, key: 'feed') => (
     <a
       key={key}
       className={`rounded-lg px-[10px] py-[9px] ${active === key ? 'bg-[rgba(25,83,57,0.12)] text-dark-green' : 'text-[rgba(23,29,26,0.64)]'}`}
@@ -257,7 +278,7 @@ function AppHeader({ active }: { active: 'home' | 'feed' | 'admin' }) {
       </IconButton>
       <a
         className="hidden sm:inline-flex border-0 rounded-lg items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-mellow-yellow text-black-grey"
-        href="#get-app"
+        href="#premium"
       >
         Get App
       </a>
@@ -305,9 +326,7 @@ function AppHeader({ active }: { active: 'home' | 'feed' | 'admin' }) {
       <header className="sticky top-0 z-40 flex items-center justify-between gap-[18px] min-h-[72px] px-[clamp(16px,4vw,64px)] py-[14px] border-b border-[rgba(23,29,26,0.14)] bg-[rgba(241,241,241,0.92)] text-black-grey backdrop-blur-[18px]">
         <LogoMark />
         <nav className="flex items-center gap-[clamp(12px,2vw,26px)] text-[0.82rem] font-bold" aria-label="App navigation">
-          {navLink('/', 'Home', 'home')}
           {navLink('/feed', 'Event Feed', 'feed')}
-          {mounted && auth.isAdmin && navLink('/admin', 'Admin Portal', 'admin')}
         </nav>
         {headerRight}
       </header>
@@ -358,11 +377,9 @@ function IconButton({
 
 function MarketingHero() {
   const heroEvent = demoEvents[0];
-  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <>
-    <section className="relative min-h-[92vh] overflow-hidden bg-black-grey text-aventi-white" id="top">
+    <section className="relative min-h-[min(92vh,920px)] overflow-hidden bg-black-grey text-aventi-white" id="top">
       <div className="absolute inset-0" aria-hidden="true">
         {heroImages.map((src, index) => (
           <img
@@ -374,67 +391,54 @@ function MarketingHero() {
           />
         ))}
       </div>
-      <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(23,29,26,0.92),rgba(23,29,26,0.58)_52%,rgba(23,29,26,0.2)),linear-gradient(0deg,rgba(23,29,26,0.65),transparent_42%)]" />
-      <header className="relative z-[2] flex items-center justify-between gap-6 px-[clamp(20px,4vw,64px)] py-7">
-        <LogoMark />
-        <nav className="flex items-center gap-[clamp(16px,2.5vw,34px)] text-[rgba(241,241,241,0.74)] text-[0.82rem] font-semibold" aria-label="Primary">
-          <a href="#product">Product</a>
-          <a href="#how-it-works">How It Works</a>
-          <a href="#premium">Premium</a>
-          <a href="/feed">Event Feed</a>
-        </nav>
-        <div className="flex items-center gap-[10px]">
-          <IconButton label="Notifications">
-            <Bell size={18} />
-          </IconButton>
-          <a className="border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-mellow-yellow text-black-grey" href="/feed">
-            Open App
-          </a>
-          <div className="sm:hidden">
-            <IconButton label="Menu" onClick={() => setMenuOpen(true)}>
-              <Menu size={19} />
-            </IconButton>
-          </div>
+      <div className={ds.heroOverlay} aria-hidden="true" />
+      <div className={`relative z-[1] ${ds.wrap} px-[clamp(20px,4vw,72px)] pt-[clamp(56px,9vh,112px)] pb-[clamp(100px,14vh,140px)]`}>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+          <span className="h-1 w-11 shrink-0 rounded-full bg-mellow-yellow shadow-[0_0_24px_rgba(249,216,70,0.45)]" aria-hidden="true" />
+          <p className={`${ds.eyebrow} !tracking-[0.14em] text-aventi-white/95`}>Connected · Explorative · In flow</p>
         </div>
-      </header>
-      <div className="relative z-[1] w-[min(760px,calc(100%-40px))] px-[clamp(20px,4vw,64px)] pt-[clamp(70px,11vh,132px)] pb-[110px]">
-        <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-mellow-yellow">Connected. Explorative. In flow.</p>
-        <h1 className="mt-[10px] mb-[18px] text-[clamp(4.5rem,16vw,12rem)] leading-[0.86] uppercase">Aventi</h1>
-        <p className="max-w-[650px] m-0 text-[rgba(241,241,241,0.78)] text-[clamp(1.02rem,1.4vw,1.3rem)] leading-[1.7]">
-          A vertical event discovery app for nights out, new neighborhoods, and plans that should feel easy to say yes
-          to. Tell Aventi your vibe, then scroll real events that fit your time, radius, budget, and mood.
+        <h1 className="mt-8 mb-6 font-semibold uppercase tracking-[0.06em] text-[clamp(3.25rem,14vw,9.5rem)] leading-[0.88] text-aventi-white drop-shadow-[0_4px_48px_rgba(0,0,0,0.35)]">
+          Aventi
+        </h1>
+        <p className={`max-w-[34rem] m-0 text-[clamp(1.05rem,1.35vw,1.25rem)] ${ds.bodyOnDark}`}>
+          The event discovery app for nights out and neighborhoods worth exploring. Set your vibe—then scroll real events
+          that match your time, radius, budget, and mood.
         </p>
-        <div className="flex flex-wrap items-center gap-3 mt-[30px]">
-          <a href="/feed" className="border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-mellow-yellow text-black-grey">
-            <Play size={18} />
-            Explore Events
+        <div className="flex flex-wrap items-center gap-3 mt-9">
+          <a href="/feed" className={ds.btnPrimary}>
+            <Play size={18} aria-hidden />
+            Explore events
           </a>
-          <a href="#how-it-works" className="border border-[rgba(241,241,241,0.17)] rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[rgba(241,241,241,0.08)] text-aventi-white">
-            <Sparkles size={18} />
-            How It Works
+          <a href="#how-it-works" className={ds.btnGhostOnDark}>
+            <Sparkles size={18} aria-hidden />
+            How it works
           </a>
         </div>
       </div>
       <div
-        className="absolute right-[clamp(20px,4vw,64px)] bottom-7 z-[2] grid grid-cols-3 w-[min(520px,calc(100%-40px))] border border-[rgba(241,241,241,0.17)] bg-[rgba(23,29,26,0.72)] backdrop-blur-[18px]"
-        aria-label="Live operating metrics"
+        className={`absolute left-[clamp(16px,4vw,72px)] right-[clamp(16px,4vw,72px)] bottom-8 md:left-auto md:right-[clamp(20px,4vw,72px)] md:bottom-10 z-[2] w-auto md:w-[min(520px,42vw)] ${ds.statsStrip}`}
+        aria-label="Live preview metrics"
       >
-        <div className="p-[18px]">
-          <span className="text-[rgba(241,241,241,0.58)]">Next Up</span>
-          <strong className="block mt-[6px] text-[1.55rem]">{heroEvent.title}</strong>
-        </div>
-        <div className="p-[18px]">
-          <span className="text-[rgba(241,241,241,0.58)]">Market</span>
-          <strong className="block mt-[6px] text-[1.55rem]">{heroEvent.city}</strong>
-        </div>
-        <div className="p-[18px]">
-          <span className="text-[rgba(241,241,241,0.58)]">Signal</span>
-          <strong className="block mt-[6px] text-[1.55rem]">{vibeLabels[heroEvent.vibes[0]]}</strong>
+        <div className="grid grid-cols-1 divide-y divide-aventi-white/12 md:grid-cols-3 md:divide-x md:divide-y-0">
+          <div className="p-5 md:p-[18px]">
+            <span className="text-[0.72rem] font-bold uppercase tracking-[0.12em] text-aventi-white/48">Next up</span>
+            <strong className="mt-2 block font-semibold text-[clamp(1.05rem,2vw,1.45rem)] leading-snug line-clamp-2">
+              {heroEvent.title}
+            </strong>
+          </div>
+          <div className="p-5 md:p-[18px]">
+            <span className="text-[0.72rem] font-bold uppercase tracking-[0.12em] text-aventi-white/48">Market</span>
+            <strong className="mt-2 block font-semibold text-[clamp(1.05rem,2vw,1.45rem)]">{heroEvent.city}</strong>
+          </div>
+          <div className="p-5 md:p-[18px]">
+            <span className="text-[0.72rem] font-bold uppercase tracking-[0.12em] text-aventi-white/48">Signal</span>
+            <strong className="mt-2 block font-semibold text-[clamp(1.05rem,2vw,1.45rem)] text-mellow-yellow/95">
+              {vibeLabels[heroEvent.vibes[0]]}
+            </strong>
+          </div>
         </div>
       </div>
     </section>
-    <NavMenu open={menuOpen} onClose={() => setMenuOpen(false)} theme="dark" />
-    </>
   );
 }
 
@@ -442,57 +446,76 @@ function MarketingProductSection() {
   const [leadEvent, secondEvent] = demoEvents;
 
   return (
-    <section className="grid grid-cols-[minmax(280px,0.82fr)_minmax(360px,1.18fr)] gap-[clamp(28px,5vw,72px)] items-center px-[clamp(16px,4vw,64px)] py-[clamp(68px,9vw,124px)] bg-aventi-white" id="product">
-      <div>
-        <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-mellow-yellow">Member product</p>
-        <h2 className="max-w-[760px] mt-[10px] mb-[18px] text-[clamp(2.5rem,7vw,6.3rem)] leading-[0.96]">Scroll until something feels worth leaving the house for.</h2>
-        <p className="text-[rgba(23,29,26,0.62)] leading-[1.75]">
-          Aventi brings the mobile feed to web without losing the core interaction: one event at a time, fast preference
-          signals, useful details close at hand, and a saved list for plans you actually want to make.
-        </p>
-        <div className="flex flex-wrap items-center gap-[18px] mt-[28px]">
-          <a className="border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-mellow-yellow text-black-grey" href="/feed">
-            <Compass size={18} />
-            Open Event Feed
-          </a>
-          <a className="border-b-2 border-[rgba(25,83,57,0.28)] text-dark-green font-extrabold" href="#premium">
-            See Premium
-          </a>
-        </div>
-      </div>
-      <div className="relative min-h-[680px] border border-[rgba(23,29,26,0.12)] rounded-lg overflow-hidden bg-[linear-gradient(135deg,rgba(25,83,57,0.92),rgba(58,144,106,0.74)),#195339]" aria-label="Aventi feed preview">
-        <div className="absolute left-[clamp(18px,5vw,70px)] top-1/2 -translate-y-1/2 w-[min(330px,calc(100%-36px))] border-[10px] border-device-bezel rounded-[34px] overflow-hidden bg-black-grey shadow-[0_30px_80px_rgba(0,0,0,0.32)]">
-          <div className="flex justify-between px-[18px] pt-[18px] pb-3 text-[rgba(241,241,241,0.68)] text-[0.72rem] font-extrabold tracking-[0.12em] uppercase">
-            <span>Aventi</span>
-            <span>Tonight</span>
+    <section className={`${ds.section} bg-aventi-white`} id="product">
+      <div className={`${ds.wrap} grid gap-12 lg:gap-16 lg:grid-cols-[minmax(280px,1fr)_minmax(360px,1.15fr)] items-center`}>
+        <div className="max-w-xl">
+          <p className={ds.eyebrow}>Member product</p>
+          <h2 className={`mt-4 mb-5 ${ds.h2}`}>Scroll until something feels worth leaving the house for.</h2>
+          <p className={`${ds.bodyMuted} text-[1.05rem]`}>
+            One event at a time—fast preference signals, rich detail when you need it, and a saved list for plans you
+            actually want to make.
+          </p>
+          <div className="flex flex-wrap items-center gap-4 mt-9">
+            <a className={ds.btnPrimary} href="/feed">
+              <Compass size={18} aria-hidden />
+              Open event feed
+            </a>
+            <a className={ds.linkAccent} href="#premium">
+              See Premium
+            </a>
           </div>
-          <div className="relative min-h-[480px] flex items-end">
-            <img src={leadEvent.imageUrl ?? heroImages[0]} alt="" className="object-cover absolute inset-0 w-full h-full" />
-            <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent,rgba(23,29,26,0.88))]" />
-            <div className="relative z-[1] px-[18px] pb-[22px] text-aventi-white">
-              <span className="text-[0.72rem] font-extrabold tracking-[0.12em] uppercase">{categoryLabels[leadEvent.category]}</span>
-              <h3 className="my-2 text-[2.1rem] leading-[0.98] uppercase">{leadEvent.title}</h3>
-              <p className="m-0 text-[rgba(241,241,241,0.72)]">
-                {leadEvent.venueName} · {formatPrice(leadEvent)}
-              </p>
+        </div>
+        <div
+          className="relative isolate min-h-[min(520px,70vw)] lg:min-h-[640px] rounded-aventi-panel border border-black-grey/10 overflow-hidden bg-[linear-gradient(135deg,rgba(25,83,57,0.92),rgba(58,144,106,0.74)),var(--color-dark-green)] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]"
+          aria-label="Aventi feed preview"
+        >
+          <div className="absolute left-[clamp(14px,4vw,56px)] top-1/2 z-[1] w-[min(300px,calc(100%-28px))] -translate-y-1/2 border-[10px] border-device-bezel rounded-[34px] overflow-hidden bg-black-grey shadow-[0_28px_90px_rgba(0,0,0,0.38)]">
+            <div className="flex justify-between px-4 pt-4 pb-3 text-aventi-white/65 text-[0.72rem] font-bold tracking-[0.14em] uppercase">
+              <span>Aventi</span>
+              <span>Tonight</span>
+            </div>
+            <div className="relative flex min-h-[440px] items-end sm:min-h-[480px]">
+              <img src={leadEvent.imageUrl ?? heroImages[0]} alt="" className="absolute inset-0 h-full w-full object-cover" />
+              <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_20%,rgba(23,29,26,0.92))]" />
+              <div className="relative z-[1] px-4 pb-6 text-aventi-white">
+                <span className="text-[0.72rem] font-bold tracking-[0.14em] uppercase text-mellow-yellow/95">
+                  {categoryLabels[leadEvent.category]}
+                </span>
+                <h3 className="mt-2 mb-1 text-[clamp(1.5rem,4vw,2rem)] font-semibold uppercase tracking-[0.04em] leading-tight">
+                  {leadEvent.title}
+                </h3>
+                <p className="m-0 text-aventi-white/72 text-[0.95rem]">
+                  {leadEvent.venueName} · {formatPrice(leadEvent)}
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2 border-t border-aventi-white/10 bg-black-grey/40 p-3">
+              {['Pass', 'Info', 'Save'].map((label) => (
+                <span
+                  key={label}
+                  className="rounded-lg border border-aventi-white/14 py-2.5 text-center text-[0.72rem] font-bold uppercase tracking-wide text-aventi-white/75"
+                >
+                  {label}
+                </span>
+              ))}
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-2 p-3">
-            {['Pass', 'Info', 'Save'].map((label) => (
-              <span key={label} className="border border-[rgba(241,241,241,0.16)] rounded-lg py-[10px] px-1 text-[rgba(241,241,241,0.7)] text-center text-[0.75rem] font-extrabold uppercase">
-                {label}
-              </span>
-            ))}
-          </div>
-        </div>
-        <div className="absolute right-[clamp(18px,5vw,70px)] bottom-[clamp(20px,6vw,76px)] w-[min(380px,calc(100%-36px))] border border-[rgba(241,241,241,0.2)] rounded-lg p-[22px] bg-[rgba(241,241,241,0.9)] shadow-[0_22px_70px_rgba(0,0,0,0.22)]">
-          <span className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-green">Next in queue</span>
-          <h3 className="mt-[9px] mb-[10px] text-[clamp(1.35rem,3vw,2.3rem)] leading-[1.05]">{secondEvent.title}</h3>
-          <p className="text-[rgba(23,29,26,0.62)] leading-[1.75]">{secondEvent.description}</p>
-          <div className="flex flex-wrap gap-2 mt-[18px]">
-            {secondEvent.vibes.slice(0, 3).map((vibe) => (
-              <span key={vibe} className="border border-[rgba(23,29,26,0.12)] rounded-lg px-[10px] py-[7px] bg-[rgba(25,83,57,0.08)] text-dark-green text-[0.76rem] font-bold uppercase">{vibeLabels[vibe]}</span>
-            ))}
+          <div className={`absolute right-[clamp(12px,3vw,48px)] bottom-[clamp(16px,4vw,48px)] left-[clamp(12px,3vw,48px)] md:left-auto md:w-[min(380px,90%)] ${ds.card} p-6`}>
+            <span className={`${ds.eyebrow} text-green`}>Next in queue</span>
+            <h3 className="mt-3 mb-2 font-semibold text-black-grey text-[clamp(1.25rem,2.5vw,1.85rem)] leading-snug">
+              {secondEvent.title}
+            </h3>
+            <p className={`${ds.bodyMuted} text-[0.98rem]`}>{secondEvent.description}</p>
+            <div className="flex flex-wrap gap-2 mt-5">
+              {secondEvent.vibes.slice(0, 3).map((vibe) => (
+                <span
+                  key={vibe}
+                  className="rounded-lg border border-[rgba(25,83,57,0.2)] bg-[rgba(25,83,57,0.08)] px-3 py-1.5 text-[0.72rem] font-bold uppercase tracking-wide text-dark-green"
+                >
+                  {vibeLabels[vibe]}
+                </span>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -502,23 +525,32 @@ function MarketingProductSection() {
 
 function MarketingFlowSection() {
   return (
-    <section className="px-[clamp(16px,4vw,64px)] py-[clamp(68px,9vw,124px)] bg-surface-mist" id="how-it-works">
-      <div className="w-[min(800px,100%)] mb-[34px]">
-        <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-mellow-yellow">How it works</p>
-        <h2 className="mt-2 mb-3 text-[clamp(2rem,5vw,4.1rem)] leading-[1.02]">A feed that learns your vibe, then opens up the city.</h2>
-      </div>
-      <div className="grid grid-cols-3 border-t border-[rgba(23,29,26,0.16)]">
-        {[
-          { num: '01', title: 'Set the night', body: 'Pick where you are, how far you will go, what you are into, and whether the evening is casual or big.' },
-          { num: '02', title: 'Swipe with intent', body: 'Pass, save, share, or open details. Each signal teaches Aventi what should show up next.' },
-          { num: '03', title: 'Build the plan', body: 'Save the standouts, get insider context, add tickets or maps, and keep a short list for the group chat.' },
-        ].map((step, i) => (
-          <article key={step.num} className={`min-h-[280px] p-[clamp(22px,3vw,38px)] ${i < 2 ? 'border-r border-[rgba(23,29,26,0.16)]' : ''}`}>
-            <span className="text-[0.72rem] font-extrabold tracking-[0.12em] uppercase text-green">{step.num}</span>
-            <h3 className="mt-6 mb-[10px] text-[clamp(1.4rem,3vw,2.6rem)] leading-[1.04]">{step.title}</h3>
-            <p className="text-[rgba(23,29,26,0.62)] leading-[1.75]">{step.body}</p>
-          </article>
-        ))}
+    <section className={`${ds.section} bg-surface-mist`} id="how-it-works">
+      <div className={ds.wrap}>
+        <div className="mb-12 max-w-3xl">
+          <p className={ds.eyebrow}>How it works</p>
+          <h2 className={`mt-4 ${ds.h2}`}>A feed that learns your vibe, then opens up the city.</h2>
+        </div>
+        <div className="grid gap-5 md:grid-cols-3 md:gap-6">
+          {[
+            { num: '01', title: 'Set the night', body: 'Pick where you are, how far you will go, what you are into, and whether the evening is casual or big.' },
+            { num: '02', title: 'Swipe with intent', body: 'Pass, save, share, or open details. Each signal teaches Aventi what should show up next.' },
+            { num: '03', title: 'Build the plan', body: 'Save the standouts, get insider context, add tickets or maps, and keep a short list for the group chat.' },
+          ].map((step) => (
+            <article
+              key={step.num}
+              className={`${ds.cardMuted} flex min-h-[260px] flex-col p-8 shadow-[0_12px_40px_-20px_rgba(23,29,26,0.12)]`}
+            >
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-[rgba(58,144,106,0.18)] text-sm font-bold tabular-nums text-dark-green">
+                {step.num}
+              </span>
+              <h3 className="mt-6 mb-3 font-semibold text-black-grey text-[clamp(1.2rem,2.2vw,1.65rem)] leading-snug">
+                {step.title}
+              </h3>
+              <p className={`mt-auto ${ds.bodyMuted}`}>{step.body}</p>
+            </article>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -526,30 +558,40 @@ function MarketingFlowSection() {
 
 function MarketingVibeSection() {
   return (
-    <section className="px-[clamp(16px,4vw,64px)] py-[clamp(68px,9vw,124px)] bg-aventi-white">
-      <div className="w-[min(800px,100%)] mb-[34px]">
-        <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-mellow-yellow">Vibe check</p>
-        <h2 className="mt-2 mb-3 text-[clamp(2rem,5vw,4.1rem)] leading-[1.02]">Not another directory. A shortcut to your kind of night.</h2>
-        <p className="max-w-[660px] text-[rgba(23,29,26,0.62)] leading-[1.75]">
-          Aventi starts with the signals people actually use when they make plans: location, radius, date, budget,
-          energy level, and the scenes they want more of.
-        </p>
-      </div>
-      <div className="grid grid-cols-4 gap-[14px]" aria-label="Aventi vibe setup">
-        {[
-          { icon: <MapPin size={22} />, label: 'Where', value: 'Denver within 8 miles' },
-          { icon: <CalendarDays size={22} />, label: 'When', value: 'Tonight after 7' },
-          { icon: <Sparkles size={22} />, label: 'Vibe', value: 'Romantic, artsy, low-key' },
-          { icon: <Filter size={22} />, label: 'Budget', value: 'Free to moderate' },
-        ].map((item) => (
-          <article key={item.label} className="min-h-[230px] border border-[rgba(23,29,26,0.12)] rounded-lg p-[clamp(20px,2.5vw,30px)] flex flex-col justify-between bg-[linear-gradient(180deg,rgba(58,144,106,0.08),transparent),rgba(255,255,255,0.72)]">
-            <div className="text-green">{item.icon}</div>
-            <div>
-              <span className="block text-[rgba(23,29,26,0.5)] text-[0.72rem] font-extrabold tracking-[0.12em] uppercase">{item.label}</span>
-              <strong className="block mt-[10px] text-black-grey text-[clamp(1.15rem,2.5vw,2rem)] leading-[1.08]">{item.value}</strong>
-            </div>
-          </article>
-        ))}
+    <section className={`${ds.section} bg-aventi-white`}>
+      <div className={ds.wrap}>
+        <div className="mb-12 max-w-3xl">
+          <p className={ds.eyebrow}>Vibe check</p>
+          <h2 className={`mt-4 mb-5 ${ds.h2}`}>Not another directory. A shortcut to your kind of night.</h2>
+          <p className={`max-w-2xl text-[1.05rem] ${ds.bodyMuted}`}>
+            Aventi starts with the signals people actually use when they make plans: location, radius, date, budget,
+            energy level, and the scenes they want more of.
+          </p>
+        </div>
+        <div
+          className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:gap-5"
+          aria-label="Aventi vibe setup"
+        >
+          {[
+            { icon: <MapPin size={22} strokeWidth={2} />, label: 'Where', value: 'Denver within 8 miles' },
+            { icon: <CalendarDays size={22} strokeWidth={2} />, label: 'When', value: 'Tonight after 7' },
+            { icon: <Sparkles size={22} strokeWidth={2} />, label: 'Vibe', value: 'Romantic, artsy, low-key' },
+            { icon: <Filter size={22} strokeWidth={2} />, label: 'Budget', value: 'Free to moderate' },
+          ].map((item) => (
+            <article
+              key={item.label}
+              className={`${ds.card} flex min-h-[220px] flex-col justify-between p-7 bg-[linear-gradient(165deg,rgba(58,144,106,0.12),transparent_55%),rgba(255,255,255,0.85)]`}
+            >
+              <div className="flex h-11 w-11 items-center justify-center rounded-aventi-panel bg-dark-green/10 text-green">{item.icon}</div>
+              <div>
+                <span className="block text-[0.72rem] font-bold uppercase tracking-[0.14em] text-black-grey/48">{item.label}</span>
+                <strong className="mt-3 block font-semibold text-black-grey text-[clamp(1.05rem,2vw,1.35rem)] leading-snug">
+                  {item.value}
+                </strong>
+              </div>
+            </article>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -559,83 +601,109 @@ function MarketingDetailsSection() {
   const event = demoEvents[2] ?? demoEvents[0];
 
   return (
-    <section className="grid grid-cols-[minmax(420px,1.35fr)_minmax(280px,0.65fr)] gap-4 items-stretch px-[clamp(16px,4vw,64px)] py-[clamp(68px,9vw,124px)] bg-surface-sage">
-      <div className="border border-[rgba(23,29,26,0.12)] rounded-lg bg-[rgba(255,255,255,0.52)] shadow-[0_24px_70px_rgba(23,29,26,0.2)] grid grid-cols-[minmax(260px,0.85fr)_minmax(320px,1.15fr)] overflow-hidden">
-        <img src={event.imageUrl ?? heroImages[2]} alt="" className="w-full h-full min-h-[520px] object-cover" />
-        <div className="p-[clamp(26px,5vw,58px)] flex flex-col justify-center">
-          <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-mellow-yellow">Event details</p>
-          <h2 className="mt-[10px] mb-[18px] text-[clamp(2.4rem,6vw,5.6rem)] leading-[0.96]">Every card can become a plan.</h2>
-          <p className="text-[rgba(23,29,26,0.62)] leading-[1.75]">
-            Open an event for the summary, vibe breakdown, date and distance, map context, shareable details, and the
-            next move: tickets, calendar, directions, or something nearby to complete the night.
+    <section className={`${ds.section} bg-surface-sage`}>
+      <div className={`${ds.wrap} grid gap-6 lg:grid-cols-[minmax(320px,1.35fr)_minmax(260px,0.65fr)] lg:items-stretch lg:gap-8`}>
+        <div className={`${ds.card} grid overflow-hidden lg:grid-cols-[minmax(240px,0.9fr)_minmax(280px,1.1fr)]`}>
+          <div className="relative min-h-[280px] lg:min-h-[520px]">
+            <img src={event.imageUrl ?? heroImages[2]} alt="" className="absolute inset-0 h-full w-full object-cover" />
+          </div>
+          <div className="flex flex-col justify-center p-[clamp(24px,5vw,52px)]">
+            <p className={ds.eyebrow}>Event details</p>
+            <h2 className={`mt-5 mb-6 ${ds.h2}`}>Every card can become a plan.</h2>
+            <p className={`${ds.bodyMuted} text-[1.05rem]`}>
+              Open an event for the summary, vibe breakdown, date and distance, map context, shareable details, and the
+              next move: tickets, calendar, directions, or something nearby to complete the night.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-2.5" aria-label="Event detail actions">
+              {[
+                { icon: <Heart size={16} aria-hidden />, label: 'Save' },
+                { icon: <Share2 size={16} aria-hidden />, label: 'Share' },
+                { icon: <CalendarDays size={16} aria-hidden />, label: 'Calendar' },
+                { icon: <MapPin size={16} aria-hidden />, label: 'Maps' },
+              ].map((item) => (
+                <span
+                  key={item.label}
+                  className="inline-flex min-h-[38px] items-center gap-2 rounded-lg border border-black-grey/12 bg-aventi-white/75 px-3 py-2 text-[0.76rem] font-bold uppercase tracking-wide text-dark-green"
+                >
+                  {item.icon}
+                  {item.label}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+        <aside
+          className={`${ds.card} flex flex-col justify-end bg-[linear-gradient(165deg,rgba(249,216,70,0.42),rgba(255,255,255,0.72)_48%),rgba(255,255,255,0.65)] p-[clamp(24px,4vw,40px)]`}
+          aria-label="Premium insight preview"
+        >
+          <span className={`${ds.eyebrow} text-green`}>Premium insight</span>
+          <h3 className="my-4 font-semibold text-black-grey text-[clamp(1.65rem,3.5vw,2.75rem)] leading-[1.05]">
+            Why it matches
+          </h3>
+          <p className={`${ds.bodyMuted} text-[1.02rem]`}>
+            Fits your artsy, after-work, under-$40 pattern. Pair it with a quiet dinner nearby and save the later jazz set
+            as backup.
           </p>
-          <div className="flex flex-wrap gap-[10px] mt-[26px]" aria-label="Event detail actions">
-            {[
-              { icon: <Heart size={16} />, label: 'Save' },
-              { icon: <Share2 size={16} />, label: 'Share' },
-              { icon: <CalendarDays size={16} />, label: 'Calendar' },
-              { icon: <MapPin size={16} />, label: 'Maps' },
-            ].map((item) => (
-              <span key={item.label} className="min-h-[38px] border border-[rgba(23,29,26,0.12)] rounded-lg px-[10px] py-2 inline-flex items-center gap-2 bg-[rgba(255,255,255,0.58)] text-dark-green text-[0.78rem] font-extrabold uppercase">
-                {item.icon}
-                {item.label}
+          <div className="mt-8 flex flex-wrap gap-2">
+            {['AI match', 'Insider tip', 'Complete the night'].map((tag) => (
+              <span
+                key={tag}
+                className="inline-flex min-h-[36px] items-center rounded-lg border border-black-grey/12 bg-aventi-white/80 px-3 py-2 text-[0.76rem] font-bold uppercase tracking-wide text-dark-green"
+              >
+                {tag}
               </span>
             ))}
           </div>
-        </div>
+        </aside>
       </div>
-      <aside
-        className="border border-[rgba(23,29,26,0.12)] rounded-lg shadow-[0_24px_70px_rgba(23,29,26,0.2)] p-[clamp(24px,4vw,38px)] flex flex-col justify-end bg-[linear-gradient(180deg,rgba(249,216,70,0.34),rgba(255,255,255,0.54)),rgba(255,255,255,0.54)]"
-        aria-label="Premium insight preview"
-      >
-        <span className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-green">Premium insight</span>
-        <h3 className="my-3 text-[clamp(1.8rem,4vw,3.7rem)] leading-[0.98]">Why it matches</h3>
-        <p className="text-[rgba(23,29,26,0.66)] leading-[1.7]">
-          Fits your artsy, after-work, under-$40 pattern. Pair it with a quiet dinner nearby and save the later jazz set
-          as backup.
-        </p>
-        <div className="flex flex-wrap gap-[10px] mt-[26px]">
-          {['AI match', 'Insider tip', 'Complete the night'].map((tag) => (
-            <span key={tag} className="min-h-[38px] border border-[rgba(23,29,26,0.12)] rounded-lg px-[10px] py-2 inline-flex items-center gap-2 bg-[rgba(255,255,255,0.58)] text-dark-green text-[0.78rem] font-extrabold uppercase">
-              {tag}
-            </span>
-          ))}
-        </div>
-      </aside>
     </section>
   );
 }
 
 function MarketingBeyondSection() {
   return (
-    <section className="grid grid-cols-[minmax(320px,0.9fr)_minmax(360px,1.1fr)] gap-[clamp(28px,5vw,72px)] items-center px-[clamp(16px,4vw,64px)] py-[clamp(68px,9vw,124px)] bg-black-grey text-aventi-white">
-      <div>
-        <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-mellow-yellow">Beyond discovery</p>
-        <h2 className="max-w-[760px] mt-[10px] mb-[18px] text-[clamp(2.5rem,7vw,6.3rem)] leading-[0.96]">From what is happening? to we are going.</h2>
-        <p className="text-[rgba(241,241,241,0.58)] leading-[1.75]">
-          Aventi is built around the moment after discovery too: saved events, smarter calendars, friend-ready sharing,
-          travel mode, and complete-the-night ideas that turn one good event into a real plan.
-        </p>
-        <a className="mt-4 inline-flex border border-[rgba(241,241,241,0.17)] rounded-lg items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[rgba(241,241,241,0.08)] text-aventi-white" href="/feed">
-          <Compass size={18} />
-          Try The Feed
-        </a>
-      </div>
-      <div className="border border-[rgba(241,241,241,0.17)] rounded-lg p-[clamp(14px,2vw,22px)] bg-[linear-gradient(135deg,rgba(58,144,106,0.18),transparent),rgba(241,241,241,0.06)] shadow-[0_34px_90px_rgba(0,0,0,0.26)]" aria-label="Aventi planning features">
-        {[
-          { icon: <CalendarDays size={22} />, label: 'Saved calendar', value: 'Keep the shortlist close' },
-          { icon: <Share2 size={22} />, label: 'Social planning', value: 'Share the exact event, not a search result' },
-          { icon: <MapPin size={22} />, label: 'Travel mode', value: 'Preview a city before you land' },
-          { icon: <Sparkles size={22} />, label: 'AI night builder', value: 'Dinner, show, after-hours, all in one flow' },
-        ].map((row, i) => (
-          <div key={row.label} className={`grid grid-cols-[auto_1fr] gap-4 items-start py-[22px] ${i > 0 ? 'border-t border-[rgba(241,241,241,0.12)]' : ''}`}>
-            <div className="text-mellow-yellow">{row.icon}</div>
-            <div>
-              <span className="block mb-[6px] text-[rgba(241,241,241,0.58)] text-[0.72rem] font-extrabold tracking-[0.12em] uppercase">{row.label}</span>
-              <strong className="block text-[clamp(1.1rem,2.4vw,1.8rem)] leading-[1.12]">{row.value}</strong>
+    <section className={`${ds.section} bg-black-grey text-aventi-white`}>
+      <div className={`${ds.wrap} grid gap-12 lg:grid-cols-[minmax(300px,1fr)_minmax(340px,1.05fr)] lg:items-center lg:gap-16`}>
+        <div className="max-w-xl">
+          <p className={ds.eyebrow}>Beyond discovery</p>
+          <h2 className={`mt-5 mb-6 ${ds.h2OnDark}`}>From “what’s happening?” to “we’re going.”</h2>
+          <p className="text-[1.05rem] leading-[1.75] text-aventi-white/58">
+            Built for after discovery too: saved events, smarter calendars, friend-ready sharing, travel mode, and
+            complete-the-night ideas that turn one good event into a real plan.
+          </p>
+          <a className={`mt-8 ${ds.btnGhostOnDark}`} href="/feed">
+            <Compass size={18} aria-hidden />
+            Try the feed
+          </a>
+        </div>
+        <div
+          className="rounded-aventi-panel border border-aventi-white/14 bg-[linear-gradient(145deg,rgba(58,144,106,0.22),transparent_50%),rgba(241,241,241,0.05)] p-6 shadow-[0_36px_100px_rgba(0,0,0,0.35)] backdrop-blur-md sm:p-8"
+          aria-label="Aventi planning features"
+        >
+          {[
+            { icon: <CalendarDays size={22} strokeWidth={2} />, label: 'Saved calendar', value: 'Keep the shortlist close' },
+            { icon: <Share2 size={22} strokeWidth={2} />, label: 'Social planning', value: 'Share the exact event, not a search result' },
+            { icon: <MapPin size={22} strokeWidth={2} />, label: 'Travel mode', value: 'Preview a city before you land' },
+            { icon: <Sparkles size={22} strokeWidth={2} />, label: 'AI night builder', value: 'Dinner, show, after-hours—in one flow' },
+          ].map((row, i) => (
+            <div
+              key={row.label}
+              className={`grid grid-cols-[auto_1fr] gap-4 items-start py-6 ${i > 0 ? 'border-t border-aventi-white/12' : ''}`}
+            >
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-aventi-panel bg-mellow-yellow/12 text-mellow-yellow">
+                {row.icon}
+              </div>
+              <div>
+                <span className="mb-1.5 block text-[0.72rem] font-bold uppercase tracking-[0.14em] text-aventi-white/52">
+                  {row.label}
+                </span>
+                <strong className="block font-semibold text-[clamp(1.05rem,2.2vw,1.45rem)] leading-snug text-aventi-white">
+                  {row.value}
+                </strong>
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -749,6 +817,7 @@ function EventPoster({
 }
 
 export function EventFeedPage() {
+  const auth = useAuthSession();
   const [events, setEvents] = useState<EventCard[]>(demoEvents);
   const [actions, setActions] = useState<Record<string, SwipeAction>>({});
   const [selectedEvent, setSelectedEvent] = useState<EventCard | null>(demoEvents[0] ?? null);
@@ -813,6 +882,15 @@ export function EventFeedPage() {
         <div className="grid grid-cols-[280px_minmax(320px,1fr)_320px] gap-4 items-start">
           <aside className="sticky top-[84px] border border-[rgba(23,29,26,0.14)] rounded-lg bg-[rgba(255,255,255,0.48)] shadow-[0_24px_70px_rgba(23,29,26,0.2)] p-[18px]">
             <div className="mb-5"><LogoMark /></div>
+            {auth.isAdmin ? (
+              <a
+                href="/admin"
+                className="flex items-center gap-3 mb-5 min-h-[42px] px-3 border border-[rgba(23,29,26,0.14)] rounded-lg bg-[rgba(25,83,57,0.08)] text-[0.86rem] font-bold text-dark-green hover:bg-[rgba(25,83,57,0.12)] transition-colors"
+              >
+                <ShieldCheck size={18} aria-hidden />
+                Admin Portal
+              </a>
+            ) : null}
             <div className="flex items-center gap-[10px] min-h-[42px] px-3 border border-[rgba(23,29,26,0.14)] rounded-lg bg-[rgba(241,241,241,0.72)] text-[0.86rem] font-semibold">
               <Search size={16} />
               <span>Denver, CO</span>
@@ -1102,40 +1180,53 @@ export function AdminPortalPage() {
 
 function PricingSection() {
   return (
-    <section className="px-[clamp(16px,4vw,64px)] py-[clamp(62px,8vw,110px)]" id="premium">
-      <div className="w-[min(800px,100%)] mb-[34px]">
-        <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-mellow-yellow">Aventi Premium</p>
-        <h2 className="mt-2 mb-3 text-[clamp(2rem,5vw,4.1rem)] leading-[1.02]">Start free. Upgrade when you want the whole city.</h2>
-      </div>
-      <div className="grid grid-cols-2 gap-4">
-        {[
-          {
-            icon: <User size={22} />,
-            title: 'Free Discovery',
-            desc: 'Browse local events, save favorites, share plans, and teach the feed what kind of nights you want more of.',
-            features: ['Daily discovery feed', 'Saved events and favorites', 'Basic vibe and distance filters'],
-            cta: 'Launch Aventi',
-          },
-          {
-            icon: <ShieldCheck size={22} />,
-            title: 'Premium',
-            desc: 'Unlock deeper search, trip planning, and AI context for people who want Aventi to become their city guide.',
-            features: ['Unlimited swipes', 'Travel mode and advanced filters', 'Insider tips and complete-the-night ideas'],
-            cta: 'Explore Premium',
-          },
-        ].map((plan) => (
-          <article key={plan.title} className="border border-[rgba(23,29,26,0.14)] rounded-lg bg-[rgba(255,255,255,0.48)] shadow-[0_24px_70px_rgba(23,29,26,0.2)] p-[clamp(22px,3vw,34px)]">
-            {plan.icon}
-            <h3 className="mt-[18px] mb-2 text-[clamp(1.4rem,3vw,2.6rem)]">{plan.title}</h3>
-            <p className="text-[rgba(23,29,26,0.62)] leading-[1.7]">{plan.desc}</p>
-            <ul className="grid gap-[10px] mt-[18px] p-0 list-none">
-              {plan.features.map((f) => (
-                <li key={f} className="relative pl-6 text-[rgba(23,29,26,0.66)] leading-[1.55] before:absolute before:left-0 before:top-[0.45em] before:w-2 before:h-2 before:rounded-full before:bg-green before:content-['']">{f}</li>
-              ))}
-            </ul>
-            <a href="/feed" className="mt-[14px] border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-mellow-yellow text-black-grey">{plan.cta}</a>
-          </article>
-        ))}
+    <section className={`${ds.section} bg-surface-mist`} id="premium">
+      <div className={ds.wrap}>
+        <div className="mb-12 max-w-3xl">
+          <p className={ds.eyebrow}>Aventi Premium</p>
+          <h2 className={`mt-4 ${ds.h2}`}>Start free. Upgrade when you want the whole city.</h2>
+        </div>
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 md:gap-8">
+          {[
+            {
+              icon: <User size={24} strokeWidth={2} className="text-dark-green" />,
+              title: 'Free Discovery',
+              desc: 'Browse local events, save favorites, share plans, and teach the feed what kind of nights you want more of.',
+              features: ['Daily discovery feed', 'Saved events and favorites', 'Basic vibe and distance filters'],
+              cta: 'Launch Aventi',
+              featured: false,
+            },
+            {
+              icon: <ShieldCheck size={24} strokeWidth={2} className="text-dark-green" />,
+              title: 'Premium',
+              desc: 'Unlock deeper search, trip planning, and AI context for people who want Aventi to become their city guide.',
+              features: ['Unlimited swipes', 'Travel mode and advanced filters', 'Insider tips and complete-the-night ideas'],
+              cta: 'Explore Premium',
+              featured: true,
+            },
+          ].map((plan) => (
+            <article
+              key={plan.title}
+              className={`${ds.card} flex flex-col p-8 transition-shadow hover:shadow-[0_28px_80px_-18px_rgba(23,29,26,0.22)] ${
+                plan.featured ? 'ring-2 ring-dark-green/25 ring-offset-2 ring-offset-surface-mist' : ''
+              }`}
+            >
+              <div className="flex h-12 w-12 items-center justify-center rounded-aventi-panel bg-[rgba(25,83,57,0.1)]">{plan.icon}</div>
+              <h3 className="mt-6 mb-3 font-semibold text-black-grey text-[clamp(1.35rem,2.8vw,2rem)]">{plan.title}</h3>
+              <p className={`${ds.bodyMuted} flex-1 text-[1.02rem]`}>{plan.desc}</p>
+              <ul className="mt-6 grid list-none gap-3 p-0">
+                {plan.features.map((f) => (
+                  <li key={f} className="relative pl-6 text-[0.98rem] leading-relaxed text-black-grey/68 before:absolute before:left-0 before:top-[0.5em] before:h-2 before:w-2 before:rounded-full before:bg-green before:content-['']">
+                    {f}
+                  </li>
+                ))}
+              </ul>
+              <a className={`mt-8 w-full sm:w-auto ${ds.btnPrimary}`} href="/feed">
+                {plan.cta}
+              </a>
+            </article>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -1144,6 +1235,7 @@ function PricingSection() {
 export function MarketingHome() {
   return (
     <>
+      <AppHeader />
       <MarketingHero />
       <MarketingProductSection />
       <MarketingFlowSection />
@@ -1151,18 +1243,40 @@ export function MarketingHome() {
       <MarketingDetailsSection />
       <MarketingBeyondSection />
       <PricingSection />
-      <footer className="flex items-center justify-between gap-[18px] px-[clamp(16px,4vw,64px)] py-6 border-t border-[rgba(23,29,26,0.14)]">
-        <LogoMark />
-        <span className="text-[rgba(23,29,26,0.55)] text-[0.72rem] font-bold tracking-[0.16em] uppercase text-center">Built from the Aventi brand system: Poppins, matte tones, generous space, and calm confidence.</span>
-        <Check size={18} />
+      <footer className="border-t border-black-grey/12 bg-aventi-white">
+        <div className={`${ds.wrap} flex flex-col gap-8 py-12 sm:flex-row sm:items-center sm:justify-between`}>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-10">
+            <LogoMark />
+            <nav className="flex flex-wrap gap-x-6 gap-y-2 text-[0.82rem] font-semibold text-black-grey/55">
+              <a className="transition-colors hover:text-dark-green" href="#product">
+                Product
+              </a>
+              <a className="transition-colors hover:text-dark-green" href="#how-it-works">
+                How it works
+              </a>
+              <a className="transition-colors hover:text-dark-green" href="#premium">
+                Premium
+              </a>
+              <a className="transition-colors hover:text-dark-green" href="/feed">
+                Feed
+              </a>
+            </nav>
+          </div>
+          <p className="max-w-md text-[0.78rem] font-medium uppercase tracking-[0.12em] text-black-grey/45 leading-relaxed">
+            Poppins · matte neutrals · generous space — Aventi brand system.
+          </p>
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-aventi-panel border border-green/30 bg-green/10 text-green">
+            <Check size={18} strokeWidth={2.5} aria-hidden />
+          </div>
+        </div>
       </footer>
       <button
-        className="fixed right-[18px] bottom-[18px] z-30 w-11 h-11 border border-[rgba(23,29,26,0.14)] rounded-lg inline-grid place-items-center bg-[rgba(241,241,241,0.88)] shadow-[0_24px_70px_rgba(23,29,26,0.2)] backdrop-blur-[18px]"
+        className="fixed right-[18px] bottom-[18px] z-30 flex h-12 w-12 items-center justify-center rounded-aventi-panel border border-dark-green/20 bg-mellow-yellow text-black-grey shadow-[0_16px_48px_-8px_rgba(23,29,26,0.35)] transition-transform hover:scale-[1.03] active:scale-[0.98]"
         type="button"
         aria-label="Scroll down"
         onClick={() => window.scrollBy({ top: window.innerHeight, behavior: 'smooth' })}
       >
-        <ArrowDown size={18} />
+        <ArrowDown size={20} strokeWidth={2.5} aria-hidden />
       </button>
       <AuthModal />
     </>
