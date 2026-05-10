@@ -131,7 +131,7 @@ export function AuthModal() {
   if (!auth.authPromptVisible) return null;
 
   const tabBtn = (mode: FormMode) =>
-    `border-0 rounded-md inline-flex items-center gap-2 min-h-[38px] px-[14px] font-bold text-[0.86rem] ${formMode === mode ? 'bg-[#195339] text-[#f1f1f1]' : 'bg-transparent text-[#171d1a]'}`;
+    `border-0 rounded-md inline-flex items-center gap-2 min-h-[38px] px-[14px] font-bold text-[0.86rem] ${formMode === mode ? 'bg-dark-green text-aventi-white' : 'bg-transparent text-black-grey'}`;
 
   return (
     <div
@@ -139,13 +139,13 @@ export function AuthModal() {
       onClick={() => { if (canCloseWithoutGuest) auth.closeAuthPrompt(); }}
     >
       <div
-        className="relative w-full max-w-md rounded-xl border border-[rgba(23,29,26,0.12)] bg-[#f1f1f1] shadow-[0_24px_70px_rgba(23,29,26,0.28)] p-8"
+        className="relative w-full max-w-md rounded-xl border border-[rgba(23,29,26,0.12)] bg-aventi-white shadow-[0_24px_70px_rgba(23,29,26,0.28)] p-8"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex gap-4 justify-between items-start mb-2">
           <div>
-            <span className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-[#3a906a]">{copy.eyebrow}</span>
-            <h2 className="mt-1 text-[1.8rem] leading-[1.1] font-bold text-[#171d1a]">{copy.title}</h2>
+            <span className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-green">{copy.eyebrow}</span>
+            <h2 className="mt-1 text-[1.8rem] leading-[1.1] font-bold text-black-grey">{copy.title}</h2>
           </div>
           {canCloseWithoutGuest ? (
             <button
@@ -162,7 +162,7 @@ export function AuthModal() {
 
         {!auth.isSupabaseConfigured ? (
           <div className="flex items-start gap-3 p-4 rounded-lg border border-[rgba(249,216,70,0.5)] bg-[rgba(249,216,70,0.12)]">
-            <Lock size={20} className="shrink-0 mt-0.5 text-[#171d1a]" />
+            <Lock size={20} className="shrink-0 mt-0.5 text-black-grey" />
             <p className="m-0 text-[0.86rem] text-[rgba(23,29,26,0.72)] leading-[1.6]">Supabase auth is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.</p>
           </div>
         ) : (
@@ -190,7 +190,7 @@ export function AuthModal() {
                 placeholder="Email"
                 autoComplete="email"
                 disabled={isSubmitting}
-                className="min-h-[44px] border border-[rgba(23,29,26,0.18)] rounded-lg px-3 bg-white text-[#171d1a] placeholder:text-[rgba(23,29,26,0.38)] disabled:opacity-55"
+                className="min-h-[44px] border border-[rgba(23,29,26,0.18)] rounded-lg px-3 bg-white text-black-grey placeholder:text-[rgba(23,29,26,0.38)] disabled:opacity-55"
               />
               <input
                 type="password"
@@ -199,7 +199,7 @@ export function AuthModal() {
                 placeholder={formMode === 'signin' ? 'Password' : 'Password (min 6+)'}
                 autoComplete={formMode === 'signin' ? 'current-password' : 'new-password'}
                 disabled={isSubmitting}
-                className="min-h-[44px] border border-[rgba(23,29,26,0.18)] rounded-lg px-3 bg-white text-[#171d1a] placeholder:text-[rgba(23,29,26,0.38)] disabled:opacity-55"
+                className="min-h-[44px] border border-[rgba(23,29,26,0.18)] rounded-lg px-3 bg-white text-black-grey placeholder:text-[rgba(23,29,26,0.38)] disabled:opacity-55"
               />
 
               {auth.isAnonymousUser && (
@@ -210,11 +210,11 @@ export function AuthModal() {
               )}
 
               {errorText && <p className="m-0 text-[0.86rem] font-semibold text-[#c0392b]">{errorText}</p>}
-              {noticeText && <p className="m-0 text-[0.86rem] font-semibold text-[#195339]">{noticeText}</p>}
+              {noticeText && <p className="m-0 text-[0.86rem] font-semibold text-dark-green">{noticeText}</p>}
 
               <button
                 type="submit"
-                className="border-0 rounded-lg inline-flex items-center justify-center gap-2 min-h-[44px] px-[18px] font-bold bg-[#f9d846] text-[#171d1a] disabled:opacity-55 disabled:cursor-not-allowed"
+                className="border-0 rounded-lg inline-flex items-center justify-center gap-2 min-h-[44px] px-[18px] font-bold bg-mellow-yellow text-black-grey disabled:opacity-55 disabled:cursor-not-allowed"
                 disabled={isSubmitting || !email.trim() || !password}
               >
                 {isSubmitting ? <Loader2 size={16} className="animate-spin" /> : null}
@@ -225,7 +225,7 @@ export function AuthModal() {
             <div className="grid gap-3">
               <button
                 type="button"
-                className="border border-[rgba(23,29,26,0.14)] rounded-lg inline-flex items-center justify-center gap-2 min-h-[44px] px-[18px] font-bold bg-transparent text-[#171d1a] disabled:opacity-55 disabled:cursor-not-allowed"
+                className="border border-[rgba(23,29,26,0.14)] rounded-lg inline-flex items-center justify-center gap-2 min-h-[44px] px-[18px] font-bold bg-transparent text-black-grey disabled:opacity-55 disabled:cursor-not-allowed"
                 onClick={handleGuestContinue}
                 disabled={isSubmitting}
               >

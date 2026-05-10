@@ -9,6 +9,7 @@ import {
   useState,
 } from 'react';
 import type { Session } from '@supabase/supabase-js';
+import { isAdminUser } from './admin-access';
 import { supabase } from './supabase';
 
 export type AuthPromptReason =
@@ -231,13 +232,7 @@ export function AuthSessionProvider({ children }: { children: React.ReactNode })
     // Don't auto-reopen the auth modal after sign-out — user explicitly signed out.
   }, []);
 
-  const isAdmin = useMemo(() => {
-    if (!session) return false;
-    const role = session.user?.app_metadata?.role;
-    const roles = session.user?.app_metadata?.roles || [];
-    return role === 'admin' || role === 'aventi_admin' || role === 'owner' ||
-           roles.includes('admin') || roles.includes('aventi_admin') || roles.includes('owner');
-  }, [session]);
+  const isAdmin = useMemo(() => isAdminUser(session?.user ?? null), [session]);
 
   const value = useMemo<AuthSessionContextValue>(() => {
     const anonymous = isAnonymousSession(session);
