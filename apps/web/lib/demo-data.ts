@@ -39,6 +39,26 @@ export const categoryLabels: Record<EventCategory, string> = {
   concerts: 'Live Music',
   wellness: 'Wellness',
   experiences: 'Arts',
+  comedy: 'Comedy',
+  sports: 'Sports',
+  outdoors: 'Outdoors',
+  markets: 'Markets',
+  tech: 'Tech & Talks',
+};
+
+// The most-discovered sub-types within each parent category, drawn from event-app norms
+// (Posh, Eventbrite, Luma, Resy, Meetup). Used to make filter chips more browseable.
+export const categoryTopTags: Record<EventCategory, string[]> = {
+  nightlife: ['Clubs', 'Rooftops', 'DJ Sets', 'Late-Night'],
+  dining: ['Date Night', 'Tasting Menus', 'Brunch', 'Cocktail Bars'],
+  concerts: ['Indie', 'Hip-Hop', 'Jazz', 'Acoustic'],
+  wellness: ['Yoga', 'Run Clubs', 'Sound Baths', 'Movement'],
+  experiences: ['Galleries', 'Workshops', 'Exhibits', 'Crafts'],
+  comedy: ['Stand-Up', 'Improv', 'Drag Shows', 'Sketch'],
+  sports: ['Pickup', 'Races', 'Climbing', 'Leagues'],
+  outdoors: ['Hikes', 'Cycling', 'Paddling', 'Camping'],
+  markets: ['Food Fests', 'Farmers', 'Makers', 'Pop-Ups'],
+  tech: ['Meetups', 'Demos', 'Hackathons', 'Talks'],
 };
 
 export const vibeLabels: Record<EventVibeTag, string> = {
@@ -51,6 +71,11 @@ export const vibeLabels: Record<EventVibeTag, string> = {
   'live-music': 'Live Music',
   wellness: 'Wellness',
   'late-night': 'Late Night',
+  'solo-friendly': 'Solo-Friendly',
+  family: 'Family',
+  adventurous: 'Adventurous',
+  intimate: 'Intimate',
+  underground: 'Underground',
 };
 
 export const demoEvents: EventCard[] = [

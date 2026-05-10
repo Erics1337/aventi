@@ -94,6 +94,11 @@ function formatCategoryFilterLabel(categories: FeedFilters['categories']): strin
     concerts: 'Live Music',
     experiences: 'Arts',
     wellness: 'Wellness',
+    comedy: 'Comedy',
+    sports: 'Sports',
+    outdoors: 'Outdoors',
+    markets: 'Markets',
+    tech: 'Tech & Talks',
   } as const;
   return categories.length === 1 ? labels[categories[0]] : `${categories.length} Categories`;
 }
@@ -110,6 +115,11 @@ function formatVibeFilterLabel(vibes: FeedFilters['vibes']): string {
     'live-music': 'Live Music',
     wellness: 'Wellness',
     'late-night': 'Late Night',
+    'solo-friendly': 'Solo-Friendly',
+    family: 'Family',
+    adventurous: 'Adventurous',
+    intimate: 'Intimate',
+    underground: 'Underground',
   } as const;
   return vibes.length === 1 ? labels[vibes[0]] : `${vibes.length} Vibes`;
 }

@@ -36,15 +36,30 @@ const RADIUS_OPTIONS = [5, 10, 25, 50, 100];
 const VIBE_OPTIONS: { label: string; value: EventVibeTag }[] = [
   { label: 'Chill', value: 'chill' },
   { label: 'Energetic', value: 'energetic' },
-  { label: 'Romantic', value: 'romantic' },
-  { label: 'Intellectual', value: 'intellectual' },
+  { label: 'Social', value: 'social' },
+  { label: 'Date Night', value: 'romantic' },
+  { label: 'Intimate', value: 'intimate' },
+  { label: 'Solo-Friendly', value: 'solo-friendly' },
+  { label: 'Family', value: 'family' },
+  { label: 'Adventurous', value: 'adventurous' },
+  { label: 'Underground', value: 'underground' },
+  { label: 'Late Night', value: 'late-night' },
+  { label: 'Live Music', value: 'live-music' },
+  { label: 'Smart', value: 'intellectual' },
+  { label: 'Wellness', value: 'wellness' },
+  { label: 'Elevated', value: 'luxury' },
 ];
 const CATEGORY_OPTIONS: { label: string; value: EventCategory }[] = [
   { label: 'Nightlife', value: 'nightlife' },
   { label: 'Dining', value: 'dining' },
   { label: 'Live Music', value: 'concerts' },
+  { label: 'Comedy', value: 'comedy' },
   { label: 'Arts', value: 'experiences' },
+  { label: 'Markets', value: 'markets' },
   { label: 'Wellness', value: 'wellness' },
+  { label: 'Sports', value: 'sports' },
+  { label: 'Outdoors', value: 'outdoors' },
+  { label: 'Tech & Talks', value: 'tech' },
 ];
 
 export function FilterSheet({ visible, filters, onClose, onApply, isPremium }: Props) {

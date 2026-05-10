@@ -13,6 +13,11 @@ export const categoryGradients = {
   concerts: ['#D946EF', '#FB7185'],
   wellness: ['#14B8A6', '#06B6D4'],
   experiences: ['#0EA5E9', '#1E3A8A'],
+  comedy: ['#FBBF24', '#B45309'],
+  sports: ['#22C55E', '#065F46'],
+  outdoors: ['#10B981', '#064E3B'],
+  markets: ['#F59E0B', '#92400E'],
+  tech: ['#6366F1', '#1E1B4B'],
 } as const;
 
 export const spacing = {
