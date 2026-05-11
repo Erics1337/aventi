@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from aventi_backend.core.auth import AuthenticatedUser, require_admin_user
 from aventi_backend.core.settings import Settings, get_settings
 from aventi_backend.db.session import get_db_session
+from aventi_backend.services.market_inventory import MarketWarmupService
 
 router = APIRouter(dependencies=[Depends(require_admin_user)])
 admin_user_dep = Depends(require_admin_user)
@@ -28,6 +30,7 @@ async def get_admin_dashboard(
         text(
             """
             select market_key, city, state, country, heat_tier,
+                   center_latitude, center_longitude,
                    visible_event_count_7d, active_user_count_7d, active_user_count_14d,
                    last_requested_at, last_scan_requested_at, last_scan_started_at,
                    last_scan_completed_at, last_scan_succeeded_at, scan_lock_until,
@@ -48,6 +51,8 @@ async def get_admin_dashboard(
             "state": row["state"],
             "country": row["country"],
             "heatTier": row["heat_tier"],
+            "centerLatitude": row["center_latitude"],
+            "centerLongitude": row["center_longitude"],
             "visibleEventCount7d": row["visible_event_count_7d"],
             "activeUserCount7d": row["active_user_count_7d"],
             "activeUserCount14d": row["active_user_count_14d"],
@@ -179,3 +184,72 @@ async def get_admin_dashboard(
             "endpointUrl": settings.aws_endpoint_url,
         },
     }
+
+
+class EnqueueMarketScanBody(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    market_key: str = Field(alias="marketKey")
+
+
+@router.get("/user-locations")
+async def get_admin_user_locations(
+    _: AuthenticatedUser = admin_user_dep,
+    session: AsyncSession = db_session_dep,
+) -> dict:
+    """Last synced device coordinates from ``profiles`` (mobile location gate). Admin-only."""
+    result = await session.execute(
+        text(
+            """
+            select id::text as user_id, city, latitude, longitude, updated_at
+            from public.profiles
+            where latitude is not null
+              and longitude is not null
+            order by updated_at desc nulls last
+            limit 500
+            """
+        )
+    )
+    users = [
+        {
+            "userId": row["user_id"],
+            "city": row["city"],
+            "state": None,
+            "country": None,
+            "latitude": float(row["latitude"]),
+            "longitude": float(row["longitude"]),
+            "updatedAt": _iso(row["updated_at"]),
+        }
+        for row in result.mappings().all()
+    ]
+    return {"users": users}
+
+
+@router.post("/import-markets-from-catalog")
+async def post_admin_import_markets_from_catalog(
+    _: AuthenticatedUser = admin_user_dep,
+    session: AsyncSession = db_session_dep,
+) -> dict:
+    summary = await MarketWarmupService(session).sync_market_inventory_from_event_venues()
+    return {"ok": True, **summary}
+
+
+@router.post("/markets/enqueue-scan")
+async def post_admin_markets_enqueue_scan(
+    body: EnqueueMarketScanBody,
+    _: AuthenticatedUser = admin_user_dep,
+    session: AsyncSession = db_session_dep,
+    settings: Settings = settings_dep,
+) -> dict:
+    if not settings.sqs_worker_queue_url:
+        raise HTTPException(
+            status_code=503,
+            detail="Worker queue is not configured (SQS_WORKER_QUEUE_URL). Cannot enqueue scans.",
+        )
+    try:
+        job = await MarketWarmupService(session).enqueue_admin_short_market_scan(body.market_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"ok": True, "jobId": job.id, "marketKey": body.market_key}

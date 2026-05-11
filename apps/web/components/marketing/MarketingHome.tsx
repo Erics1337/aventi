@@ -25,6 +25,7 @@ import type { EventCard } from '@aventi/contracts';
 import { categoryLabels, demoEvents, heroImages, vibeLabels } from '@/lib/demo-data';
 import { formatEventTime, formatPrice } from '@/lib/format';
 import { useAuthSession } from '@/lib/auth-session';
+import { isHttpUrl, useGetAppStoreHref } from '@/lib/mobile-store';
 import { AuthModal } from '../AuthModal';
 import { motion } from '../ui/app-ui';
 
@@ -49,6 +50,7 @@ function NavMenu({
   theme?: 'light' | 'dark';
 }) {
   const auth = useAuthSession();
+  const getAppHref = useGetAppStoreHref();
 
   // Close on Escape
   useEffect(() => {
@@ -83,9 +85,6 @@ function NavMenu({
   const navItems: { href: string; label: string; icon: React.ReactNode; key: string }[] = [
     { href: '/',       label: 'Home',         icon: <Compass size={18} />,     key: 'home' },
     { href: '/feed',   label: 'Event Feed',   icon: <Sparkles size={18} />,    key: 'feed' },
-    ...(auth.isAdmin
-      ? [{ href: '/admin', label: 'Admin Portal', icon: <ShieldCheck size={18} />, key: 'admin' }]
-      : []),
   ];
 
   return (
@@ -129,12 +128,15 @@ function NavMenu({
         {/* Get App CTA */}
         <div className="px-3 py-4">
           <a
-            href="/profile"
+            href={getAppHref}
             className="flex items-center gap-3 rounded-lg px-4 py-3 font-bold bg-[#f9d846] text-[#171d1a]"
             onClick={onClose}
+            {...(isHttpUrl(getAppHref)
+              ? { target: '_blank' as const, rel: 'noopener noreferrer' }
+              : {})}
           >
             <Play size={18} />
-            Get the Mobile App
+            Get App
           </a>
         </div>
 
@@ -149,6 +151,24 @@ function NavMenu({
                   {auth.email}
                 </p>
               )}
+              <a
+                href="/profile"
+                className={`${linkBase} ${active === 'profile' ? linkActive : linkIdle}`}
+                onClick={onClose}
+              >
+                <User size={18} />
+                Profile
+              </a>
+              {auth.isAdmin ? (
+                <a
+                  href="/admin"
+                  className={`${linkBase} ${active === 'admin' ? linkActive : linkIdle}`}
+                  onClick={onClose}
+                >
+                  <ShieldCheck size={18} />
+                  Admin Panel
+                </a>
+              ) : null}
               <button
                 className={`${linkBase} w-full ${isDark ? 'text-[rgba(241,241,241,0.78)] hover:bg-[rgba(241,241,241,0.07)]' : 'text-[rgba(23,29,26,0.72)] hover:bg-[rgba(23,29,26,0.06)]'}`}
                 onClick={() => { auth.signOut(); onClose(); }}
@@ -299,7 +319,17 @@ function IconButton({
 
 function MarketingHero() {
   const heroEvent = demoEvents[0];
+  const auth = useAuthSession();
+  const getAppHref = useGetAppStoreHref();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const authPillDark =
+    'inline-flex items-center gap-2 rounded-lg border border-[rgba(241,241,241,0.17)] bg-[rgba(241,241,241,0.08)] px-3 h-[42px] text-[0.82rem] font-bold text-[#f1f1f1] hover:bg-[rgba(241,241,241,0.14)]';
 
   return (
     <>
@@ -323,13 +353,51 @@ function MarketingHero() {
           <a href="#how-it-works">How It Works</a>
           <a href="#premium">Premium</a>
           <a href="/feed">Event Feed</a>
+          {mounted && auth.isAdmin ? (
+            <a href="/admin" className="inline-flex items-center gap-1.5 text-[#f9d846]">
+              <ShieldCheck size={14} />
+              Admin Portal
+            </a>
+          ) : null}
         </nav>
         <div className="flex items-center gap-[10px]">
           <IconButton label="Notifications">
             <Bell size={18} />
           </IconButton>
-          <a className="border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[#f9d846] text-[#171d1a]" href="/feed">
-            Open App
+          {mounted ? (
+            auth.isAuthenticated ? (
+              <button
+                className={authPillDark}
+                type="button"
+                onClick={() => setMenuOpen(true)}
+                title={auth.email || 'Account'}
+              >
+                <User size={16} />
+                <span className="hidden sm:inline max-w-[120px] truncate">
+                  {auth.email?.split('@')[0] ?? 'Account'}
+                </span>
+              </button>
+            ) : (
+              <button
+                className={authPillDark}
+                type="button"
+                onClick={() => auth.openAuthPrompt('welcome')}
+              >
+                <User size={16} />
+                <span className="hidden sm:inline">Sign In</span>
+              </button>
+            )
+          ) : (
+            <div className="w-[42px] h-[42px] rounded-lg border border-[rgba(241,241,241,0.17)] bg-[rgba(241,241,241,0.06)]" aria-hidden />
+          )}
+          <a
+            className="border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[#f9d846] text-[#171d1a]"
+            href={getAppHref}
+            {...(isHttpUrl(getAppHref)
+              ? { target: '_blank' as const, rel: 'noopener noreferrer' }
+              : {})}
+          >
+            Get App
           </a>
           <div className="sm:hidden">
             <IconButton label="Menu" onClick={() => setMenuOpen(true)}>

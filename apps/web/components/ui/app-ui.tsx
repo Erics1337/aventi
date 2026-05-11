@@ -26,7 +26,7 @@ export const glass = {
   cardElev:
     'rounded-[var(--radius-card)] border border-[var(--color-app-border)] bg-[var(--color-app-surface-2)] backdrop-blur-[14px] shadow-[0_30px_80px_rgba(0,0,0,0.35)]',
   bar:
-    'border border-[var(--color-app-border)] bg-[rgba(7,7,13,0.78)] backdrop-blur-[18px]',
+    'border border-[var(--color-app-border)] bg-[rgba(10,16,14,0.82)] backdrop-blur-[18px]',
 };
 
 // Motion class string — apply on any interactive surface.
@@ -155,9 +155,9 @@ const pillTones: Record<NonNullable<PillProps['tone']>, string> = {
   neutral:
     'bg-[var(--color-app-surface)] text-[var(--color-app-text-muted)] border border-[var(--color-app-border)]',
   violet:
-    'bg-[rgba(107,75,255,0.14)] text-[var(--color-violet-bright)] border border-[rgba(107,75,255,0.28)]',
+    'bg-[var(--color-app-mellow-muted)] text-[var(--color-app-mellow)] border border-[color-mix(in_srgb,var(--color-app-mellow)_38%,transparent)]',
   success:
-    'bg-[rgba(77,255,168,0.10)] text-[var(--color-success-neon)] border border-[rgba(77,255,168,0.28)] shadow-[var(--glow-success)]',
+    'bg-[rgba(143,191,159,0.12)] text-[var(--color-success-neon)] border border-[color-mix(in_srgb,var(--color-success-neon)_40%,transparent)] shadow-[var(--glow-success)]',
   danger:
     'bg-[rgba(255,77,109,0.10)] text-[var(--color-danger-glow)] border border-[rgba(255,77,109,0.30)]',
   premium:

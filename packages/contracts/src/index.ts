@@ -160,6 +160,9 @@ export interface AdminMarketSummary {
   state?: string | null;
   country: string;
   heatTier: AdminMarketHeatTier;
+  /** Approximate catalog / scan center when known (optional). */
+  centerLatitude?: number | null;
+  centerLongitude?: number | null;
   visibleEventCount7d: number;
   activeUserCount7d: number;
   activeUserCount14d: number;
@@ -195,6 +198,41 @@ export interface AdminVerificationSummary {
   active?: boolean | null;
   count: number;
   latestVerifiedAt?: string | null;
+}
+
+export interface AdminImportMarketsCatalogResponse {
+  ok: true;
+  synced: number;
+  marketsConsidered: number;
+  heat: {
+    updated: number;
+    hot: number;
+    warm: number;
+    cold: number;
+  };
+}
+
+/** @deprecated use AdminImportMarketsCatalogResponse */
+export type AdminSyncMarketsFromVenuesResponse = AdminImportMarketsCatalogResponse;
+
+export interface AdminUserLocationPoint {
+  userId: string;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  latitude: number;
+  longitude: number;
+  updatedAt?: string | null;
+}
+
+export interface AdminUserLocationsResponse {
+  users: AdminUserLocationPoint[];
+}
+
+export interface AdminEnqueueMarketScanResponse {
+  ok: true;
+  jobId: string;
+  marketKey: string;
 }
 
 export interface AdminDashboardResponse {

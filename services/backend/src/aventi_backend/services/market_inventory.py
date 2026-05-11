@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from aventi_backend.core.settings import get_settings
 from aventi_backend.services.ingest import ManualIngestService
-from aventi_backend.services.jobs import JobQueueRepository, JobType
+from aventi_backend.services.jobs import JobQueueRepository, JobRecord, JobType
 from aventi_backend.services.providers import DiscoveryCandidate, build_market_scan_scraper
 from aventi_backend.services.verification import VerificationService
 
@@ -264,6 +264,98 @@ class MarketWarmupService:
         )
         return visible_count
 
+    async def sync_market_inventory_from_event_venues(self) -> dict[str, Any]:
+        """Upsert ``market_inventory_state`` for every market implied by the event catalog.
+
+        Events are stored against **venues** (city / state / country). This pass groups
+        live-ish occurrences by venue geography and upserts matching ``market_inventory_state``
+        rows, then recomputes visible 7-day counts—the same signal the scanner uses.
+
+        Rows are normally created by mobile ``/me/market-seen`` or scan workers; this is an
+        admin backfill when catalog data exists but inventory rows were never created.
+        """
+        result = await self.session.execute(
+            text(
+                """
+                select
+                    trim(v.city) as city,
+                    nullif(trim(coalesce(v.state, '')), '') as state,
+                    upper(coalesce(nullif(trim(v.country), ''), 'US')) as country,
+                    max(v.latitude) as center_latitude,
+                    max(v.longitude) as center_longitude
+                from public.events e
+                join public.venues v on v.id = e.venue_id
+                join public.event_occurrences eo on eo.event_id = e.id
+                where e.hidden = false
+                  and eo.cancelled = false
+                  and eo.starts_at >= now() - interval '90 days'
+                  and eo.starts_at < now() + interval '120 days'
+                group by trim(v.city), nullif(trim(coalesce(v.state, '')), ''),
+                         upper(coalesce(nullif(trim(v.country), ''), 'US'))
+                having length(trim(v.city)) > 0
+                """
+            )
+        )
+        rows = result.mappings().all()
+        synced = 0
+        for row in rows:
+            market = build_market_descriptor(
+                city=str(row["city"]),
+                state=row["state"],
+                country=str(row["country"] or "US"),
+                center_latitude=_coerce_float(row["center_latitude"]),
+                center_longitude=_coerce_float(row["center_longitude"]),
+            )
+            if market is None:
+                continue
+            await self.refresh_market_inventory_state(market)
+            synced += 1
+        heat = await self.recompute_all_heat()
+        return {"synced": synced, "marketsConsidered": len(rows), "heat": heat}
+
+    async def enqueue_admin_short_market_scan(self, market_key: str) -> JobRecord:
+        """Queue a single short-window ``MARKET_SCAN`` (SerpAPI) for an existing market row."""
+        row = (
+            await self.session.execute(
+                text(
+                    """
+                    select market_key, city, state, country,
+                           center_latitude, center_longitude, heat_tier
+                    from public.market_inventory_state
+                    where market_key = :market_key
+                    """
+                ),
+                {"market_key": market_key},
+            )
+        ).mappings().first()
+        if not row:
+            raise ValueError(f"Unknown market_key: {market_key}")
+        market = MarketDescriptor(
+            key=str(row["market_key"]),
+            city=str(row["city"]),
+            state=_optional_str(row["state"]),
+            country=str(row["country"] or "US"),
+            center_latitude=_coerce_float(row["center_latitude"]),
+            center_longitude=_coerce_float(row["center_longitude"]),
+            heat_tier=str(row["heat_tier"] or "cold"),
+        )
+        now = datetime.now(tz=UTC)
+        await self._upsert_market_state(
+            market,
+            last_scan_requested_at=now,
+        )
+        short_window = SCAN_WINDOWS[0]
+        tier = market.heat_tier if market.heat_tier in PAGE_BUDGET_BY_TIER else "cold"
+        pages = PAGE_BUDGET_BY_TIER.get(tier, 1)
+        return await self._enqueue_market_scan_job(
+            market,
+            angle=str(short_window["angle"]),
+            source_name=f"admin-short:{market.city.lower()}",
+            source_type="serpapi",
+            source_data={"dateWindow": dict(short_window), "pages": pages},
+            extra_payload={"scanType": "admin", "heatTier": market.heat_tier},
+        )
+
     async def request_warmup(
         self,
         market: MarketDescriptor,
@@ -444,13 +536,13 @@ class MarketWarmupService:
             discovery_jobs_enqueued = 0
             if force_discovery or visible_count < MARKET_WARM_TARGET:
                 for angle in DISCOVERY_ANGLES:
-                    if await self._enqueue_market_scan_job(
+                    await self._enqueue_market_scan_job(
                         market,
                         angle=angle,
                         source_name="serpapi",
                         source_type="serpapi",
-                    ):
-                        discovery_jobs_enqueued += 1
+                    )
+                    discovery_jobs_enqueued += 1
 
             visible_count = await self.refresh_market_inventory_state(market)
             await self._mark_scan_completed(market, success=True, error=None)
@@ -520,7 +612,7 @@ class MarketWarmupService:
         source_url: str | None = None,
         source_data: Any = None,
         extra_payload: dict[str, Any] | None = None,
-    ) -> bool:
+    ) -> JobRecord:
         payload: dict[str, Any] = {
             "marketKey": market.key,
             "marketCity": market.city,
@@ -540,8 +632,7 @@ class MarketWarmupService:
             payload["sourceData"] = source_data
         if extra_payload:
             payload.update(extra_payload)
-        await JobQueueRepository(self.session).enqueue_job(JobType.MARKET_SCAN, payload)
-        return True
+        return await JobQueueRepository(self.session).enqueue_job(JobType.MARKET_SCAN, payload)
 
     async def _structured_source_rows(self, market_key: str) -> list[dict[str, Any]]:
         result = await self.session.execute(

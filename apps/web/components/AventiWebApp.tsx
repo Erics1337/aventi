@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import type { Session } from '@supabase/supabase-js';
 import {
@@ -9,20 +9,20 @@ import {
   Bell,
   CalendarDays,
   Check,
-  ChevronDown,
   ChevronRight,
+  Clock,
   Code2,
   Compass,
   Dumbbell,
   Eye,
   Filter,
   Gauge,
+  Import,
   Heart,
   Info,
   Leaf,
   Loader2,
   Lock,
-  LogOut,
   MapPin,
   Menu,
   Mountain,
@@ -40,12 +40,14 @@ import {
   Theater,
   Sparkles,
   User,
+  Users,
   UtensilsCrossed,
   X,
 } from 'lucide-react';
 import type {
   AdminDashboardResponse,
   AdminMarketSummary,
+  AdminUserLocationPoint,
   EventCard,
   EventCategory,
   EventVibeTag,
@@ -143,6 +145,129 @@ function marketStatus(market: AdminMarketSummary) {
   return 'ready';
 }
 
+type LatLng = { lat: number; lng: number };
+
+function geoBounds(points: LatLng[]): { minLat: number; maxLat: number; minLng: number; maxLng: number } {
+  if (points.length === 0) {
+    return { minLat: 30, maxLat: 31, minLng: -98, maxLng: -97 };
+  }
+  let minLat = points[0].lat;
+  let maxLat = points[0].lat;
+  let minLng = points[0].lng;
+  let maxLng = points[0].lng;
+  for (const p of points) {
+    minLat = Math.min(minLat, p.lat);
+    maxLat = Math.max(maxLat, p.lat);
+    minLng = Math.min(minLng, p.lng);
+    maxLng = Math.max(maxLng, p.lng);
+  }
+  const padLat = Math.max((maxLat - minLat) * 0.12, 0.08);
+  const padLng = Math.max((maxLng - minLng) * 0.12, 0.08);
+  return {
+    minLat: minLat - padLat,
+    maxLat: maxLat + padLat,
+    minLng: minLng - padLng,
+    maxLng: maxLng + padLng,
+  };
+}
+
+function projectToPercent(lat: number, lng: number, b: ReturnType<typeof geoBounds>) {
+  const latSpan = Math.max(b.maxLat - b.minLat, 1e-6);
+  const lngSpan = Math.max(b.maxLng - b.minLng, 1e-6);
+  const x = ((lng - b.minLng) / lngSpan) * 100;
+  const y = (1 - (lat - b.minLat) / latSpan) * 100;
+  return {
+    left: `${Math.min(96, Math.max(4, x))}%`,
+    top: `${Math.min(96, Math.max(4, y))}%`,
+  };
+}
+
+function AdminPeopleMap({
+  users,
+  markets,
+}: {
+  users: AdminUserLocationPoint[];
+  markets: AdminMarketSummary[];
+}) {
+  const marketCenters: LatLng[] = markets
+    .filter(
+      (m) =>
+        typeof m.centerLatitude === 'number' &&
+        typeof m.centerLongitude === 'number' &&
+        !Number.isNaN(m.centerLatitude) &&
+        !Number.isNaN(m.centerLongitude),
+    )
+    .map((m) => ({ lat: m.centerLatitude as number, lng: m.centerLongitude as number }));
+  const userPts: LatLng[] = users.map((u) => ({ lat: u.latitude, lng: u.longitude }));
+  const bounds = geoBounds([...userPts, ...marketCenters]);
+
+  return (
+    <div className={`${glass.card} p-4 space-y-3`}>
+      <div>
+        <h3 className={type.h2}>Where people are (profile GPS)</h3>
+        <p className={`${type.caption} text-[var(--color-app-text-muted)] mt-1 max-w-[720px]`}>
+          Each dot is the last location synced from the mobile app to <code className="text-[0.75rem]">profiles</code>.
+          Rings are indexed market centers from inventory when coordinates exist. Markets can also be created from
+          catalog venue cities without any user dot nearby—that is why the two layers do not always line up.
+        </p>
+      </div>
+      <div
+        className="relative w-full min-h-[min(52vw,320px)] max-h-[420px] rounded-[var(--radius-card)] border border-[var(--color-app-border)] bg-[var(--color-app-bg-elev)] overflow-hidden"
+        role="img"
+        aria-label="Scatter map of user locations and market centers"
+      >
+        {users.length === 0 && marketCenters.length === 0 ? (
+          <div className="absolute inset-0 grid place-items-center p-6 text-center">
+            <p className={`${type.body} text-[var(--color-app-text-muted)]`}>
+              No coordinates yet. Open the app with location on so profiles pick up latitude and longitude, or import
+              markets from the catalog so centers can appear.
+            </p>
+          </div>
+        ) : null}
+        {users.map((u) => {
+          const pos = projectToPercent(u.latitude, u.longitude, bounds);
+          return (
+            <span
+              key={u.userId}
+              title={u.city ? `${u.city}` : u.userId.slice(0, 8)}
+              className="absolute w-2.5 h-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--color-violet-bright)] shadow-[0_0_12px_rgba(167,139,250,0.55)]"
+              style={{ left: pos.left, top: pos.top }}
+            />
+          );
+        })}
+        {markets.map((m) => {
+          if (
+            typeof m.centerLatitude !== 'number' ||
+            typeof m.centerLongitude !== 'number' ||
+            Number.isNaN(m.centerLatitude) ||
+            Number.isNaN(m.centerLongitude)
+          ) {
+            return null;
+          }
+          const pos = projectToPercent(m.centerLatitude, m.centerLongitude, bounds);
+          return (
+            <span
+              key={`m-${m.marketKey}`}
+              title={`${m.city} (${m.marketKey})`}
+              className="absolute w-4 h-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[var(--color-success-neon)] bg-transparent opacity-90"
+              style={{ left: pos.left, top: pos.top }}
+            />
+          );
+        })}
+      </div>
+      <div className={`flex flex-wrap gap-4 ${type.caption} text-[var(--color-app-text-muted)]`}>
+        <span className="inline-flex items-center gap-2">
+          <span className="inline-block w-2.5 h-2.5 rounded-full bg-[var(--color-violet-bright)]" /> User (profile)
+        </span>
+        <span className="inline-flex items-center gap-2">
+          <span className="inline-block w-3 h-3 rounded-full border-2 border-[var(--color-success-neon)]" /> Market
+          center
+        </span>
+      </div>
+    </div>
+  );
+}
+
 // Marketing components extracted to ./marketing/MarketingHome.tsx
 
 function FilterRail({
@@ -158,9 +283,12 @@ function FilterRail({
 }) {
   const chipBase = `${motion.base} inline-flex items-center gap-2 h-9 px-3 rounded-full text-[0.8125rem] font-medium border`;
   const chipIdle = 'border-[var(--color-app-border)] bg-[var(--color-app-surface)] text-[var(--color-app-text-muted)] hover:text-[var(--color-app-text)] hover:bg-[var(--color-app-surface-2)]';
-  const chipDate = 'border-[var(--color-violet-bright)]/40 bg-[rgba(107,75,255,0.14)] text-[var(--color-violet-bright)]';
-  const chipCategory = 'border-[rgba(77,255,168,0.4)] bg-[rgba(77,255,168,0.10)] text-[var(--color-success-neon)]';
-  const chipVibe = 'border-white/30 bg-white/[0.10] text-white';
+  const chipDate =
+    'border-[color-mix(in_srgb,var(--color-app-mellow)_55%,transparent)] bg-[var(--color-app-mellow-muted)] text-[var(--color-app-mellow)]';
+  const chipCategory =
+    'border-[color-mix(in_srgb,var(--color-success-neon)_50%,transparent)] bg-[rgba(143,191,159,0.12)] text-[var(--color-success-neon)]';
+  const chipVibe =
+    'border-[color-mix(in_srgb,var(--color-app-clay)_55%,transparent)] bg-[var(--color-app-clay-muted)] text-[color-mix(in_srgb,var(--color-app-clay)_92%,white)]';
   const labelDate = (d: FeedFilters['date']) =>
     d === 'week' ? 'This week' : d === 'today' ? 'Today' : d === 'tomorrow' ? 'Tomorrow' : 'Weekend';
 
@@ -215,10 +343,10 @@ function PosterIconButton({
 }) {
   const base = `${motion.base} w-11 h-11 inline-grid place-items-center rounded-full backdrop-blur-[14px] active:scale-95`;
   const glassTone =
-    'bg-[rgba(7,7,13,0.55)] border border-white/15 text-white hover:bg-[rgba(7,7,13,0.75)]';
+    'bg-[rgba(10,16,14,0.58)] border border-white/15 text-white hover:bg-[rgba(10,16,14,0.78)]';
   const violetTone = active
     ? 'bg-[var(--color-violet)] border border-[var(--color-violet-bright)] text-white shadow-[var(--glow-violet)]'
-    : 'bg-[rgba(107,75,255,0.18)] border border-[var(--color-violet)]/50 text-white hover:bg-[rgba(107,75,255,0.32)]';
+    : 'bg-[rgba(26,90,66,0.22)] border border-[var(--color-violet-bright)]/45 text-white hover:bg-[rgba(26,90,66,0.38)]';
   return (
     <button
       type="button"
@@ -263,14 +391,14 @@ function EventPoster({
 
   return (
     <article
-      className={`relative h-[calc(100dvh-176px)] [scroll-snap-align:start] overflow-hidden rounded-none md:rounded-[var(--radius-card)] md:h-auto md:min-h-[min(720px,calc(100dvh-160px))] md:mb-4 bg-[var(--color-app-bg-elev)] text-white ${motion.base} ${
+      className={`relative h-[calc(100dvh-5.5rem)] [scroll-snap-align:start] overflow-hidden rounded-none md:rounded-[var(--radius-card)] md:h-auto md:min-h-[min(720px,calc(100dvh-9rem))] bg-[var(--color-app-bg-elev)] text-white ${motion.base} ${
         action === 'like'
           ? 'outline outline-[3px] outline-[var(--color-violet)] shadow-[var(--glow-violet)]'
           : ''
       }`}
     >
       <img src={event.imageUrl ?? heroImages[0]} alt="" className="object-cover absolute inset-0 w-full h-full" />
-      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(7,7,13,0.20),rgba(7,7,13,0.92)),linear-gradient(90deg,rgba(7,7,13,0.65),transparent_62%)]" />
+      <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(10,16,14,0.22),rgba(10,16,14,0.92)),linear-gradient(90deg,rgba(12,26,20,0.72),transparent_62%)]" />
       <div className="relative z-[1] flex justify-between gap-3 p-4 sm:p-5">
         <span className={`${glass.bar} rounded-full px-3 py-1.5 text-[0.75rem] font-semibold`}>
           {categoryLabels[event.category]}
@@ -366,8 +494,9 @@ function MobileFilterSheet({
   const chipIdle =
     'border-[var(--color-app-border)] bg-[var(--color-app-surface)] text-[var(--color-app-text-muted)] hover:text-[var(--color-app-text)]';
   const chipDate =
-    'border-[var(--color-violet-bright)]/40 bg-[rgba(107,75,255,0.14)] text-[var(--color-violet-bright)]';
-  const chipVibe = 'border-white/30 bg-white/[0.10] text-white';
+    'border-[color-mix(in_srgb,var(--color-app-mellow)_55%,transparent)] bg-[var(--color-app-mellow-muted)] text-[var(--color-app-mellow)]';
+  const chipVibe =
+    'border-[color-mix(in_srgb,var(--color-app-clay)_55%,transparent)] bg-[var(--color-app-clay-muted)] text-[color-mix(in_srgb,var(--color-app-clay)_92%,white)]';
 
   return (
     <>
@@ -388,20 +517,16 @@ function MobileFilterSheet({
         // animated off-screen, since we keep it mounted for the transition.
         // React 19+ accepts the boolean directly.
         inert={!open}
-        className={`fixed bottom-0 left-0 right-0 mx-auto md:max-w-[560px] md:bottom-6 z-50 max-h-[88dvh] md:max-h-[min(720px,calc(100dvh-64px))] overflow-y-auto rounded-t-[24px] md:rounded-[var(--radius-card)] border border-[var(--color-app-border)] md:border-t md:border bg-[rgba(7,7,13,0.96)] backdrop-blur-[18px] text-white shadow-[0_-30px_80px_rgba(0,0,0,0.5)] transition-transform duration-[var(--dur-base)] ease-[var(--ease-out)] ${
-          open ? 'translate-y-0' : 'translate-y-full'
+        className={`scrollbar-none fixed bottom-0 left-0 right-0 mx-auto md:max-w-[560px] md:bottom-6 z-50 max-h-[88dvh] md:max-h-[min(720px,calc(100dvh-64px))] overflow-y-auto rounded-t-[24px] md:rounded-[var(--radius-card)] border border-[var(--color-app-border)] md:border-t md:border bg-[color-mix(in_srgb,var(--color-app-bg-elev)_96%,transparent)] backdrop-blur-[18px] text-white shadow-[0_-30px_80px_rgba(0,0,0,0.5)] transition-[transform,opacity] duration-[var(--dur-base)] ease-[var(--ease-out)] ${
+          open ? 'translate-y-0 opacity-100 pointer-events-auto' : 'translate-y-full opacity-0 pointer-events-none'
         }`}
       >
-        {/* drag handle */}
-        <div className="flex justify-center pt-3 pb-1">
-          <div className="w-10 h-1 rounded-full bg-white/20" />
-        </div>
-        {/* header */}
-        <div className="flex items-center justify-between px-5 pb-3 pt-1 border-b border-[var(--color-app-border)]">
+        {/* header — no “home indicator” drag pill; web filter panel is not a native sheet */}
+        <div className="flex items-center justify-between px-5 pb-3 pt-4 border-b border-[var(--color-app-border)]">
           <div className="flex items-center gap-2">
             <span id="aventi-filters-title" className={type.h2}>Filters</span>
             {activeCount > 0 && (
-              <span className="inline-grid place-items-center min-w-5 h-5 px-1.5 rounded-full bg-[var(--color-violet)] text-white text-[0.7rem] font-bold">
+              <span className="inline-grid place-items-center min-w-5 h-5 px-1.5 rounded-full bg-[var(--color-app-mellow-muted)] text-[var(--color-app-mellow)] border border-[color-mix(in_srgb,var(--color-app-mellow)_40%,transparent)] text-[0.7rem] font-bold">
                 {activeCount}
               </span>
             )}
@@ -458,7 +583,7 @@ function MobileFilterSheet({
                     aria-pressed={isActive}
                     className={`${motion.base} w-full text-left rounded-[var(--radius-card)] border px-3 py-3 ${
                       isActive
-                        ? 'border-[var(--color-success-neon)]/40 bg-[rgba(77,255,168,0.08)] shadow-[var(--glow-success)]'
+                        ? 'border-[color-mix(in_srgb,var(--color-success-neon)_45%,transparent)] bg-[rgba(143,191,159,0.10)] shadow-[var(--glow-success)]'
                         : 'border-[var(--color-app-border)] bg-[var(--color-app-surface)]'
                     }`}
                   >
@@ -466,13 +591,13 @@ function MobileFilterSheet({
                       <span
                         className={`inline-grid place-items-center w-9 h-9 rounded-[var(--radius-card)] ${
                           isActive
-                            ? 'bg-[rgba(77,255,168,0.14)] text-[var(--color-success-neon)]'
+                            ? 'bg-[rgba(143,191,159,0.16)] text-[var(--color-success-neon)]'
                             : 'bg-[var(--color-app-surface-2)] text-[var(--color-app-text-muted)]'
                         }`}
                       >
                         {categoryIcons[category]}
                       </span>
-                      <span className={`${type.body} font-semibold ${isActive ? 'text-[var(--color-success-neon)]' : 'text-white'}`}>
+                      <span className={`${type.body} font-semibold ${isActive ? 'text-[color-mix(in_srgb,var(--color-success-neon)_90%,white)]' : 'text-white'}`}>
                         {categoryLabels[category]}
                       </span>
                       <span className={`ml-auto ${type.caption}`}>
@@ -485,7 +610,7 @@ function MobileFilterSheet({
                           key={tag}
                           className={`inline-flex items-center px-2 h-6 rounded-full text-[0.7rem] font-medium ${
                             isActive
-                              ? 'bg-[rgba(77,255,168,0.10)] text-[var(--color-success-neon)]'
+                              ? 'bg-[rgba(143,191,159,0.12)] text-[var(--color-success-neon)]'
                               : 'bg-[var(--color-app-surface-2)] text-[var(--color-app-text-muted)]'
                           }`}
                         >
@@ -552,6 +677,7 @@ function MobileFilterSheet({
 
 
 export function EventFeedPage() {
+  const auth = useAuthSession();
   const [events, setEvents] = useState<EventCard[]>(demoEvents);
   const [actions, setActions] = useState<Record<string, SwipeAction>>({});
   const [selectedEvent, setSelectedEvent] = useState<EventCard | null>(demoEvents[0] ?? null);
@@ -572,6 +698,48 @@ export function EventFeedPage() {
       return categoryMatch && vibeMatch;
     });
   }, [events, filters.categories, filters.vibes]);
+
+  const feedMainRef = useRef<HTMLElement>(null);
+  const feedEndLatchedRef = useRef(false);
+  const [feedEndReached, setFeedEndReached] = useState(false);
+
+  const updateFeedScrollEnd = useCallback(() => {
+    const el = feedMainRef.current;
+    if (!el || filteredEvents.length === 0) {
+      feedEndLatchedRef.current = false;
+      setFeedEndReached(false);
+      return;
+    }
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    const nearBottom = scrollTop + clientHeight >= scrollHeight - 12;
+    const cannotScroll = scrollHeight <= clientHeight + 8;
+    const scrolledBackUp = scrollTop + clientHeight < scrollHeight - 160;
+    if (nearBottom || cannotScroll) {
+      feedEndLatchedRef.current = true;
+      setFeedEndReached(true);
+    } else if (scrolledBackUp && feedEndLatchedRef.current) {
+      feedEndLatchedRef.current = false;
+      setFeedEndReached(false);
+    }
+  }, [filteredEvents.length]);
+
+  useEffect(() => {
+    feedEndLatchedRef.current = false;
+    setFeedEndReached(false);
+  }, [filteredEvents]);
+
+  useEffect(() => {
+    const el = feedMainRef.current;
+    if (!el) return;
+    updateFeedScrollEnd();
+    el.addEventListener('scroll', updateFeedScrollEnd, { passive: true });
+    const ro = new ResizeObserver(() => updateFeedScrollEnd());
+    ro.observe(el);
+    return () => {
+      el.removeEventListener('scroll', updateFeedScrollEnd);
+      ro.disconnect();
+    };
+  }, [filteredEvents, updateFeedScrollEnd]);
 
   function handleAction(event: EventCard, action: SwipeAction) {
     const result = applySwipeAction(events, actions, event.id, action);
@@ -633,9 +801,12 @@ export function EventFeedPage() {
 
   return (
     <AppShell active={isFilterSheetOpen ? 'filters' : 'discovery'}>
-      <section className="px-3 sm:px-5 md:px-8 pt-4 md:pt-8 pb-6" id="feed">
+      <section
+        className="flex flex-1 min-h-0 flex-col px-3 sm:px-5 md:px-8 pt-4 md:pt-8 pb-0"
+        id="feed"
+      >
         {/* Top filter chip toolbar — desktop only, mobile uses the sheet */}
-        <div className="hidden md:block mb-5">
+        <div className="hidden md:block mb-5 shrink-0">
           <FilterRail
             filters={filters}
             onToggleCategory={toggleCategory}
@@ -644,9 +815,10 @@ export function EventFeedPage() {
           />
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-5 items-start">
+        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)] gap-5 overflow-hidden xl:grid-cols-[minmax(0,1fr)_340px] xl:grid-rows-1">
           <main
-            className="h-[calc(100dvh-176px)] overflow-y-scroll [scroll-snap-type:y_mandatory] [overscroll-behavior-y:contain] md:h-[min(820px,calc(100dvh-160px))] md:overflow-y-auto pr-1"
+            ref={feedMainRef}
+            className="scrollbar-none h-full min-h-0 overflow-y-auto overscroll-y-contain [scroll-snap-type:y_proximity] md:space-y-4 md:pr-1"
             aria-label="Aventi event feed"
           >
             {filteredEvents.length > 0 ? (
@@ -661,7 +833,7 @@ export function EventFeedPage() {
               ))
             ) : (
               <Surface elev className="grid place-items-center min-h-[320px] p-7 text-center gap-3">
-                <Sparkles size={28} className="text-[var(--color-violet-bright)]" />
+                <Sparkles size={28} className="text-[var(--color-app-mellow)]" />
                 <h3 className={type.h1}>No matches</h3>
                 <p className={type.caption}>
                   Aventi would trigger a targeted warming scan for this filter signature.
@@ -671,13 +843,23 @@ export function EventFeedPage() {
                 </Button>
               </Surface>
             )}
-            <div className={`hidden md:flex items-center justify-center gap-2 min-h-[72px] mb-4 ${type.caption}`}>
-              <ChevronDown size={18} />
-              <span>Pull past the end to mine more events</span>
-            </div>
+            {feedEndReached && filteredEvents.length > 0 ? (
+              <div className="mx-auto mt-4 max-w-lg scroll-mt-4 md:mt-6" role="status" aria-live="polite">
+                <Surface className="mb-6 px-5 py-6 text-center">
+                  <span className="mx-auto mb-3 inline-grid h-11 w-11 place-items-center rounded-full bg-[var(--color-app-mellow-muted)] text-[var(--color-app-mellow)]">
+                    <Clock size={20} strokeWidth={1.6} aria-hidden />
+                  </span>
+                  <h3 className={type.h2}>You&apos;re caught up</h3>
+                  <p className={`${type.body} mt-2 text-[var(--color-app-text-muted)]`}>
+                    That&apos;s the end of this feed for now. Check back later for more events near you, or adjust
+                    filters to widen what we show.
+                  </p>
+                </Surface>
+              </div>
+            ) : null}
           </main>
 
-          <aside className={`hidden xl:block xl:sticky xl:top-[24px] ${glass.cardElev} p-5`}>
+          <aside className={`hidden min-h-0 xl:block xl:sticky xl:top-[24px] xl:self-start ${glass.cardElev} p-5`}>
             {selectedEvent ? (
               <>
                 <Pill tone="violet">Selected event</Pill>
@@ -741,9 +923,14 @@ export function EventFeedPage() {
 
 export function AdminPortalPage() {
   const auth = useAuthSession();
-  const [activeTab, setActiveTab] = useState<'markets' | 'scans'>('markets');
+  const [activeTab, setActiveTab] = useState<'people' | 'markets' | 'scans'>('people');
   const [dashboard, setDashboard] = useState<AdminDashboardResponse | null>(null);
+  const [userLocations, setUserLocations] = useState<AdminUserLocationPoint[] | null>(null);
+  const [peopleLoading, setPeopleLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [scanBusyKey, setScanBusyKey] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function loadDashboard(token?: string | null) {
@@ -762,6 +949,51 @@ export function AdminPortalPage() {
     }
   }
 
+  async function importMarketsFromCatalog() {
+    const t = auth.session?.access_token ?? null;
+    if (!t) return;
+    setSyncBusy(true);
+    setError(null);
+    setActionError(null);
+    try {
+      await createAventiApi(t).postAdminImportMarketsFromCatalog();
+      await loadDashboard(t);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to import markets from catalog');
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
+  async function loadPeopleLocations() {
+    const t = auth.session?.access_token ?? null;
+    if (!t) return;
+    setPeopleLoading(true);
+    try {
+      const res = await createAventiApi(t).getAdminUserLocations();
+      setUserLocations(res.users);
+    } catch {
+      setUserLocations([]);
+    } finally {
+      setPeopleLoading(false);
+    }
+  }
+
+  async function enqueueMarketScan(marketKey: string) {
+    const t = auth.session?.access_token ?? null;
+    if (!t) return;
+    setScanBusyKey(marketKey);
+    setActionError(null);
+    try {
+      await createAventiApi(t).postAdminEnqueueMarketScan({ marketKey });
+      await loadDashboard(t);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Unable to enqueue market scan');
+    } finally {
+      setScanBusyKey(null);
+    }
+  }
+
   useEffect(() => {
     if (auth.isReady && auth.session) {
       void loadDashboard(auth.session.access_token);
@@ -769,7 +1001,13 @@ export function AdminPortalPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth.isReady]);
 
-  const tabBtn = (tab: 'markets' | 'scans') =>
+  useEffect(() => {
+    if (activeTab !== 'people' || !auth.isReady || !auth.session?.access_token) return;
+    void loadPeopleLocations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, auth.isReady, auth.session?.access_token]);
+
+  const tabBtn = (tab: 'people' | 'markets' | 'scans') =>
     `${motion.base} inline-flex items-center gap-2 h-9 px-3.5 rounded-full text-[0.8125rem] font-semibold ${
       activeTab === tab
         ? 'bg-[var(--color-violet)] text-white shadow-[var(--glow-violet)]'
@@ -781,7 +1019,7 @@ export function AdminPortalPage() {
       status === 'ready'
         ? 'bg-[rgba(77,255,168,0.10)] text-[var(--color-success-neon)] border-[var(--color-success-neon)]/40'
         : status === 'warming' || status === 'targeted_warming' || status === 'running' || status === 'queued' || status === 'completed'
-        ? 'bg-[rgba(107,75,255,0.14)] text-[var(--color-violet-bright)] border-[var(--color-violet)]/40'
+        ? 'bg-[rgba(47,143,104,0.14)] text-[var(--color-violet-bright)] border-[var(--color-violet)]/40'
         : status === 'succeeded'
         ? 'bg-[rgba(77,255,168,0.10)] text-[var(--color-success-neon)] border-[var(--color-success-neon)]/40'
         : 'bg-[var(--color-app-surface)] text-[var(--color-app-text-muted)] border-[var(--color-app-border)]';
@@ -790,8 +1028,11 @@ export function AdminPortalPage() {
 
   return (
     <AppShell active="admin">
-      <section className="px-4 sm:px-6 md:px-8 pt-6 md:pt-8 pb-12" id="admin">
-        <div className="max-w-[760px] mb-8">
+      <section
+        className="scrollbar-none flex min-h-0 flex-1 flex-col overflow-y-auto px-4 sm:px-6 md:px-8 pt-6 md:pt-8 pb-12 max-w-[1100px] mx-auto w-full"
+        id="admin"
+      >
+        <div className="max-w-[720px] mb-8">
           <Pill tone="violet">Admin portal</Pill>
           <h1 className={`${type.display} mt-3 mb-3`}>
             Backend market scans, visible at a glance.
@@ -808,44 +1049,52 @@ export function AdminPortalPage() {
               <span className={`${type.label} text-[var(--color-app-text-muted)]`}>Operations</span>
               <h2 className={`${type.h1} mt-1`}>Chron market scan console</h2>
             </div>
-            <div
-              className="flex items-center gap-1 p-1 rounded-full border border-[var(--color-app-border)] bg-[var(--color-app-surface)]"
-              role="tablist"
-              aria-label="Admin views"
-            >
-              <button className={tabBtn('markets')} type="button" onClick={() => setActiveTab('markets')}>
-                <Gauge size={14} strokeWidth={1.6} />
-                Markets
-              </button>
-              <button className={tabBtn('scans')} type="button" onClick={() => setActiveTab('scans')}>
-                <Activity size={14} strokeWidth={1.6} />
-                Scans
-              </button>
+            <div className="flex flex-wrap items-center gap-2 justify-end">
+              <div
+                className="flex items-center gap-1 p-1 rounded-full border border-[var(--color-app-border)] bg-[var(--color-app-surface)]"
+                role="tablist"
+                aria-label="Admin views"
+              >
+                <button className={tabBtn('people')} type="button" onClick={() => setActiveTab('people')}>
+                  <Users size={14} strokeWidth={1.6} />
+                  People
+                </button>
+                <button className={tabBtn('markets')} type="button" onClick={() => setActiveTab('markets')}>
+                  <Gauge size={14} strokeWidth={1.6} />
+                  Markets
+                </button>
+                <button className={tabBtn('scans')} type="button" onClick={() => setActiveTab('scans')}>
+                  <Activity size={14} strokeWidth={1.6} />
+                  Scans
+                </button>
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void importMarketsFromCatalog()}
+                disabled={isLoading || syncBusy}
+                title="Upsert market_inventory_state from venue cities on your event catalog (wide occurrence window), then recompute visible 7-day counts and heat tiers."
+                leadingIcon={<Import size={14} strokeWidth={1.6} />}
+              >
+                Import catalog markets
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => loadDashboard()}
+                disabled={isLoading || syncBusy}
+                leadingIcon={<RefreshCcw size={14} strokeWidth={1.6} />}
+              >
+                Refresh
+              </Button>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-end gap-2 mb-5 p-3 rounded-[var(--radius-card)] border border-[var(--color-app-border)] bg-[var(--color-app-surface)]">
-            <span className={`${type.body} text-[var(--color-app-text-muted)] mr-auto`}>
-              {auth.email ?? 'Admin session active'}
-            </span>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => loadDashboard()}
-              disabled={isLoading}
-              leadingIcon={<RefreshCcw size={14} strokeWidth={1.6} />}
-            >
-              Refresh
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => auth.signOut()}
-              leadingIcon={<LogOut size={14} strokeWidth={1.6} />}
-            >
-              Sign out
-            </Button>
-          </div>
+          {actionError ? (
+            <p className={`${type.body} text-[var(--color-danger-glow)] mb-4`} role="alert">
+              {actionError}
+            </p>
+          ) : null}
 
           {error ? (
             <Surface className="grid gap-3 place-items-center p-8 text-center mb-5">
@@ -890,12 +1139,34 @@ export function AdminPortalPage() {
                 ))}
               </div>
 
+              {activeTab === 'people' ? (
+                peopleLoading ? (
+                  <Surface className="grid gap-3 place-items-center p-8 text-center mb-5">
+                    <Loader2 size={24} className="animate-spin text-[var(--color-violet-bright)]" />
+                    <p className={`${type.body} text-[var(--color-app-text-muted)]`}>Loading profile locations…</p>
+                  </Surface>
+                ) : (
+                  <AdminPeopleMap users={userLocations ?? []} markets={dashboard.markets} />
+                )
+              ) : null}
+
+              {activeTab === 'markets' && dashboard.markets.length === 0 ? (
+                <p
+                  className={`${type.body} text-[var(--color-app-text-muted)] mb-5 max-w-[560px]`}
+                >
+                  No markets are indexed yet. Rows are usually created when the mobile app reports
+                  activity or a scan runs. If you already have events in Postgres, use{' '}
+                  <strong className="text-[var(--color-app-text)]">Import catalog markets</strong> above
+                  to backfill one row per venue city from the catalog.
+                </p>
+              ) : null}
+
               {activeTab === 'markets' ? (
                 <>
                   {/* Desktop table — hidden on mobile */}
                   <div className={`${glass.card} overflow-x-auto hidden md:block`} role="table" aria-label="Market inventory state">
                     <div
-                      className={`grid grid-cols-[1.3fr_1fr_0.7fr_1fr_1.1fr_0.7fr] gap-4 min-w-[860px] px-4 py-3 items-center ${type.label} text-[var(--color-app-text-muted)]`}
+                      className={`grid grid-cols-[1.25fr_0.95fr_0.55fr_0.95fr_0.95fr_0.55fr_auto] gap-3 min-w-[940px] px-4 py-3 items-center ${type.label} text-[var(--color-app-text-muted)]`}
                       role="row"
                     >
                       <span>Market</span>
@@ -903,13 +1174,15 @@ export function AdminPortalPage() {
                       <span>Visible</span>
                       <span>Last scan</span>
                       <span>Targeted</span>
-                      <span>Active users</span>
+                      <span>Users</span>
+                      <span className="text-right">Scan</span>
                     </div>
                     {dashboard.markets.map((market) => {
                       const status = marketStatus(market);
+                      const queueOk = dashboard.workerQueue.configured;
                       return (
                         <div
-                          className={`grid grid-cols-[1.3fr_1fr_0.7fr_1fr_1.1fr_0.7fr] gap-4 min-w-[860px] px-4 py-3 items-center border-t border-[var(--color-app-border)] ${type.body}`}
+                          className={`grid grid-cols-[1.25fr_0.95fr_0.55fr_0.95fr_0.95fr_0.55fr_auto] gap-3 min-w-[940px] px-4 py-3 items-center border-t border-[var(--color-app-border)] ${type.body}`}
                           role="row"
                           key={market.marketKey}
                         >
@@ -924,6 +1197,23 @@ export function AdminPortalPage() {
                           <span>{formatDateTime(market.lastScanCompletedAt ?? market.lastScanStartedAt)}</span>
                           <span>{formatDateTime(market.lastTargetedRequestedAt)}</span>
                           <span>{market.activeUserCount7d}</span>
+                          <span className="flex justify-end">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              type="button"
+                              disabled={!queueOk || scanBusyKey === market.marketKey}
+                              title={
+                                queueOk
+                                  ? 'Queue one short-window SerpAPI MARKET_SCAN for this city (requires worker + SQS).'
+                                  : 'Configure SQS_WORKER_QUEUE_URL so jobs can be enqueued.'
+                              }
+                              leadingIcon={<Play size={12} strokeWidth={1.6} />}
+                              onClick={() => void enqueueMarketScan(market.marketKey)}
+                            >
+                              {scanBusyKey === market.marketKey ? '…' : 'Queue'}
+                            </Button>
+                          </span>
                         </div>
                       );
                     })}
@@ -933,6 +1223,7 @@ export function AdminPortalPage() {
                   <div className="grid gap-3 md:hidden">
                     {dashboard.markets.map((market) => {
                       const status = marketStatus(market);
+                      const queueOk = dashboard.workerQueue.configured;
                       return (
                         <article key={market.marketKey} className={`${glass.card} p-4 space-y-2`}>
                           <div className="flex items-start justify-between gap-2">
@@ -952,6 +1243,22 @@ export function AdminPortalPage() {
                             <span className="text-[var(--color-app-text-muted)]">Active users</span>
                             <span>{market.activeUserCount7d}</span>
                           </div>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            type="button"
+                            className="w-full mt-1"
+                            disabled={!queueOk || scanBusyKey === market.marketKey}
+                            title={
+                              queueOk
+                                ? 'Queue one short-window SerpAPI MARKET_SCAN for this city.'
+                                : 'Configure SQS_WORKER_QUEUE_URL so jobs can be enqueued.'
+                            }
+                            leadingIcon={<Play size={12} strokeWidth={1.6} />}
+                            onClick={() => void enqueueMarketScan(market.marketKey)}
+                          >
+                            {scanBusyKey === market.marketKey ? 'Queueing…' : 'Queue short scan'}
+                          </Button>
                         </article>
                       );
                     })}
@@ -1040,7 +1347,7 @@ export function SavedPage() {
 
   return (
     <AppShell active="saved">
-      <div className="mx-auto w-full max-w-[760px] px-4 sm:px-6 pt-6 pb-12">
+      <div className="scrollbar-none mx-auto flex min-h-0 w-full max-w-[760px] flex-1 flex-col overflow-y-auto px-4 sm:px-6 pt-6 pb-12">
         <div className="flex items-center gap-3 mb-6">
           <h1 className={type.h1}>Saved events</h1>
           <Pill tone="violet">{savedEvents.length}</Pill>
@@ -1048,7 +1355,7 @@ export function SavedPage() {
 
         {savedEvents.length === 0 ? (
           <Surface elev className="px-6 py-10 text-center grid place-items-center gap-4">
-            <span className="w-14 h-14 rounded-full bg-[rgba(107,75,255,0.14)] text-[var(--color-violet-bright)] inline-grid place-items-center">
+            <span className="w-14 h-14 rounded-full bg-[var(--color-app-mellow-muted)] text-[var(--color-app-mellow)] inline-grid place-items-center">
               <Heart size={24} strokeWidth={1.6} />
             </span>
             <div>
@@ -1113,7 +1420,7 @@ export function ProfilePage() {
 
   return (
     <AppShell active="profile">
-      <div className="mx-auto w-full max-w-[640px] px-5 pt-10 pb-12">
+      <div className="scrollbar-none mx-auto flex min-h-0 w-full max-w-[640px] flex-1 flex-col overflow-y-auto px-5 pt-10 pb-12">
         {/* Identity card */}
         <Surface elev className="px-6 py-7 flex flex-col items-center text-center">
           <div
@@ -1163,7 +1470,7 @@ export function ProfilePage() {
               href="/terms"
               className={`${motion.base} ${glass.card} flex items-center gap-3 px-4 py-4 hover:bg-[var(--color-app-surface-2)]`}
             >
-              <span className="w-9 h-9 rounded-[var(--radius-card)] bg-[rgba(166,124,255,0.14)] text-[var(--color-violet-bright)] inline-grid place-items-center">
+              <span className="w-9 h-9 rounded-[var(--radius-card)] bg-[var(--color-app-mellow-muted)] text-[var(--color-app-mellow)] inline-grid place-items-center">
                 <Info size={16} strokeWidth={1.6} />
               </span>
               <span className={`${type.body} flex-1 text-[var(--color-app-text)]`}>Terms</span>

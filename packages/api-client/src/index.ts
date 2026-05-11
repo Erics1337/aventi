@@ -1,5 +1,8 @@
 import type {
   AdminDashboardResponse,
+  AdminEnqueueMarketScanResponse,
+  AdminImportMarketsCatalogResponse,
+  AdminUserLocationsResponse,
   FeedImpressionPayload,
   FeedRequest,
   FeedResponse,
@@ -154,6 +157,23 @@ export class AventiApiClient {
 
   getAdminDashboard() {
     return this.request<AdminDashboardResponse>(`/v1/admin/dashboard`);
+  }
+
+  getAdminUserLocations() {
+    return this.request<AdminUserLocationsResponse>(`/v1/admin/user-locations`);
+  }
+
+  postAdminImportMarketsFromCatalog() {
+    return this.request<AdminImportMarketsCatalogResponse>(`/v1/admin/import-markets-from-catalog`, {
+      method: 'POST',
+    });
+  }
+
+  postAdminEnqueueMarketScan(payload: { marketKey: string }) {
+    return this.request<AdminEnqueueMarketScanResponse>(`/v1/admin/markets/enqueue-scan`, {
+      method: 'POST',
+      body: JSON.stringify({ marketKey: payload.marketKey }),
+    });
   }
 
   getFavorites() {
