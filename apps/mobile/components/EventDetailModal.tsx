@@ -26,7 +26,7 @@ function formatDateTime(iso: string): string {
 function DetailRow({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
   return (
     <View className="flex-row gap-3 items-start py-2">
-      <View className="mt-0.5 h-8 w-8 items-center justify-center rounded-full bg-white/8">
+      <View className="mt-0.5 h-8 w-8 items-center justify-center rounded-full bg-white/10">
         <Ionicons name={icon} size={16} color="rgba(255,255,255,0.7)" />
       </View>
       <View className="flex-1">
@@ -75,7 +75,7 @@ export function EventDetailModal({ event, visible, onClose }: Props) {
     >
       <BlurView intensity={60} tint="dark" style={{ flex: 1 }}>
         <View className="flex-1 justify-end">
-          <View className="max-h-[85%] rounded-t-[28px] border-t border-white/10 bg-black/95">
+          <View className="max-h-[85%] rounded-t-[28px] border-t border-aventi-border bg-aventi-overlay">
             {/* Header gradient bar */}
             <LinearGradient
               colors={gradient as unknown as [string, string]}
@@ -99,7 +99,7 @@ export function EventDetailModal({ event, visible, onClose }: Props) {
 
             <ScrollView className="px-6 pb-8" showsVerticalScrollIndicator={false}>
               {/* Category pill */}
-              <View className="overflow-hidden self-start px-3 py-1 mb-3 rounded-full border border-white/15">
+              <View className="overflow-hidden self-start px-3 py-1 mb-3 rounded-full border border-aventi-borderStrong">
                 <LinearGradient
                   colors={gradient as unknown as [string, string]}
                   style={{
@@ -115,7 +115,7 @@ export function EventDetailModal({ event, visible, onClose }: Props) {
               </View>
 
               {/* Title */}
-              <Text className="text-2xl font-bold uppercase tracking-[1.5px] text-white">
+              <Text className="text-[26px] leading-[31px] text-white" style={{ fontFamily: 'Poppins_700Bold' }}>
                 {event.title}
               </Text>
 
@@ -127,7 +127,7 @@ export function EventDetailModal({ event, visible, onClose }: Props) {
               ) : null}
 
               {/* Detail rows */}
-              <View className="p-4 mt-5 rounded-2xl border border-white/8 bg-white/3">
+              <View className="p-4 mt-5 rounded-2xl border border-white/10 bg-white/5">
                 <DetailRow icon="location" label="Venue" value={event.venueName} />
                 {ratingText ? (
                   <DetailRow icon="star" label="Rating" value={ratingText} />
@@ -155,7 +155,7 @@ export function EventDetailModal({ event, visible, onClose }: Props) {
                             Linking.openURL(offer.url);
                           }
                         }}
-                        className="flex-row justify-between items-center px-4 py-3 rounded-xl border border-white/8 bg-white/3 active:opacity-70"
+                        className="flex-row justify-between items-center px-4 py-3 rounded-xl border border-white/10 bg-white/5 active:opacity-70"
                       >
                         <View className="flex-1">
                           <Text className="text-sm font-medium text-white/90">{offer.provider || 'Ticket'}</Text>
@@ -177,7 +177,7 @@ export function EventDetailModal({ event, visible, onClose }: Props) {
                 <Text className="mb-2 text-[11px] uppercase tracking-[2px] text-white/50">Vibes</Text>
                 <View className="flex-row flex-wrap gap-2">
                   {event.vibes.map((vibe) => (
-                    <View key={vibe} className="rounded-full border border-white/12 bg-white/5 px-3 py-1.5">
+                    <View key={vibe} className="rounded-full border border-white/15 bg-aventi-glass px-3 py-1.5">
                       <Text className="text-xs uppercase tracking-[1px] text-white/80">{vibe}</Text>
                     </View>
                   ))}

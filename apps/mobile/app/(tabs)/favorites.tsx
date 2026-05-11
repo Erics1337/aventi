@@ -59,7 +59,7 @@ function FavoriteEventRow({
           <Text className="mt-1 text-xs text-white/60">{formatEventTime(event)}</Text>
           <View className="mt-3 flex-row flex-wrap gap-2">
             {event.vibes.slice(0, 4).map((vibe) => (
-              <View key={vibe} className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1">
+              <View key={vibe} className="rounded-full border border-aventi-border bg-aventi-glass px-2.5 py-1">
                 <Text className="text-[10px] uppercase tracking-[1px] text-white/75">{vibe}</Text>
               </View>
             ))}
@@ -68,7 +68,7 @@ function FavoriteEventRow({
         <View className="w-[112px] gap-2">
           <Pressable
             onPress={() => onOpen(event)}
-            className="rounded-xl border border-white/15 bg-white/10 px-3 py-3 active:scale-95"
+            className="rounded-xl border border-aventi-borderStrong bg-white/10 px-3 py-3 active:scale-95"
           >
             <Text className="text-center text-[11px] font-semibold uppercase tracking-[1.2px] text-white">
               View
@@ -78,7 +78,7 @@ function FavoriteEventRow({
             disabled={isRemoving}
             onPress={() => onRemove(event.id)}
             className={`rounded-xl border px-3 py-3 ${
-              isRemoving ? 'border-white/5 bg-white/5' : 'border-rose-300/20 bg-rose-400/10 active:scale-95'
+              isRemoving ? 'border-white/5 bg-aventi-glass' : 'border-rose-300/20 bg-rose-400/10 active:scale-95'
             }`}
           >
             <Text
@@ -93,7 +93,7 @@ function FavoriteEventRow({
             disabled={isReporting}
             onPress={() => onReport(event)}
             className={`rounded-xl border px-3 py-3 ${
-              isReporting ? 'border-white/5 bg-white/5' : 'border-white/10 bg-white/5 active:scale-95'
+              isReporting ? 'border-white/5 bg-aventi-glass' : 'border-aventi-border bg-aventi-glass active:scale-95'
             }`}
           >
             <Text
@@ -118,7 +118,7 @@ interface MissingFavoriteRowProps {
 
 function MissingFavoriteRow({ eventId, isRemoving, onRemove }: MissingFavoriteRowProps) {
   return (
-    <View className="mb-2 flex-row items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+    <View className="mb-2 flex-row items-center justify-between gap-3 rounded-2xl border border-aventi-border bg-aventi-glass px-4 py-3">
       <View className="flex-1">
         <Text className="text-xs uppercase tracking-[1.2px] text-white/50">Unavailable Event</Text>
         <Text className="mt-1 text-xs text-white/70" numberOfLines={1}>
@@ -129,7 +129,7 @@ function MissingFavoriteRow({ eventId, isRemoving, onRemove }: MissingFavoriteRo
         disabled={isRemoving}
         onPress={() => onRemove(eventId)}
         className={`rounded-full border px-3 py-2 ${
-          isRemoving ? 'border-white/5 bg-white/5' : 'border-white/10 bg-white/10 active:scale-95'
+          isRemoving ? 'border-white/5 bg-aventi-glass' : 'border-aventi-border bg-white/10 active:scale-95'
         }`}
       >
         <Text className={`text-[10px] font-semibold uppercase tracking-[1px] ${isRemoving ? 'text-white/40' : 'text-white/85'}`}>
@@ -285,7 +285,7 @@ export default function FavoritesScreen() {
 
   if (!auth.isReady) {
     return (
-      <View className="flex-1 bg-black px-4 pt-14">
+      <View className="flex-1 bg-aventi-canvas px-4 pt-14">
         <LoadingConstruct label="Preparing your Favorites" />
       </View>
     );
@@ -293,15 +293,15 @@ export default function FavoritesScreen() {
 
   if (!auth.isAuthenticated) {
     return (
-      <View className="flex-1 bg-black px-4 pt-14">
+      <View className="flex-1 bg-aventi-canvas px-4 pt-14">
         <View className="mb-4 flex-row items-center justify-between">
           <Pressable
             onPress={() => router.back()}
-            className="rounded-full border border-white/15 bg-white/10 px-4 py-3 active:scale-95"
+            className="rounded-full border border-aventi-borderStrong bg-white/10 px-4 py-3 active:scale-95"
           >
             <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white">Back</Text>
           </Pressable>
-          <Text className="text-xs uppercase tracking-[3px] text-white/55">Favorites</Text>
+          <Text className="text-xs uppercase tracking-[2px] text-aventi-pink">Favorites</Text>
         </View>
 
         <GlassPanel>
@@ -315,13 +315,13 @@ export default function FavoritesScreen() {
           <View className="mt-4 flex-row gap-3">
             <Pressable
               onPress={() => auth.openAuthPrompt('favorites')}
-              className="rounded-full border border-white/15 bg-white/10 px-4 py-3 active:scale-95"
+              className="rounded-full border border-aventi-borderStrong bg-white/10 px-4 py-3 active:scale-95"
             >
               <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white">Open Auth</Text>
             </Pressable>
             <Pressable
               onPress={() => router.replace('/')}
-              className="rounded-full border border-white/10 bg-white/5 px-4 py-3 active:scale-95"
+              className="rounded-full border border-aventi-border bg-aventi-glass px-4 py-3 active:scale-95"
             >
               <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white/85">Back to Feed</Text>
             </Pressable>
@@ -332,23 +332,23 @@ export default function FavoritesScreen() {
   }
 
   return (
-    <View className="flex-1 bg-black px-4 pt-14">
+    <View className="flex-1 bg-aventi-canvas px-4 pt-14">
       <View className="mb-4 flex-row items-center justify-between gap-3">
         <Pressable
           onPress={() => router.back()}
-          className="rounded-full border border-white/15 bg-white/10 px-4 py-3 active:scale-95"
+          className="rounded-full border border-aventi-borderStrong bg-white/10 px-4 py-3 active:scale-95"
         >
           <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white">Back</Text>
         </Pressable>
         <View className="flex-1">
-          <Text className="text-xs uppercase tracking-[3px] text-white/55">Aventi</Text>
-          <Text className="mt-1 text-2xl font-bold uppercase tracking-[2px] text-white">Favorites</Text>
+          <Text className="text-xs uppercase tracking-[2px] text-aventi-pink">Aventi</Text>
+          <Text className="mt-1 text-[28px] leading-[32px] text-white" style={{ fontFamily: 'Poppins_700Bold' }}>Favorites</Text>
         </View>
         <Pressable
           onPress={() => {
             void favoritesQuery.refetch();
           }}
-          className="rounded-full border border-white/10 bg-white/5 px-4 py-3 active:scale-95"
+          className="rounded-full border border-aventi-border bg-aventi-glass px-4 py-3 active:scale-95"
         >
           <Text className="text-xs font-semibold uppercase tracking-[1.2px] text-white/85">Refresh</Text>
         </Pressable>
@@ -388,7 +388,7 @@ export default function FavoritesScreen() {
             onPress={() => {
               void favoritesQuery.refetch();
             }}
-            className="mt-4 self-start rounded-full border border-white/15 bg-white/10 px-4 py-3 active:scale-95"
+            className="mt-4 self-start rounded-full border border-aventi-borderStrong bg-white/10 px-4 py-3 active:scale-95"
           >
             <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white">Retry</Text>
           </Pressable>
@@ -404,7 +404,7 @@ export default function FavoritesScreen() {
           </Text>
           <Pressable
             onPress={() => router.replace('/')}
-            className="mt-4 self-start rounded-full border border-white/15 bg-white/10 px-4 py-3 active:scale-95"
+            className="mt-4 self-start rounded-full border border-aventi-borderStrong bg-white/10 px-4 py-3 active:scale-95"
           >
             <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white">Back to Feed</Text>
           </Pressable>
@@ -459,8 +459,8 @@ export default function FavoritesScreen() {
         transparent
         onRequestClose={handleCloseReport}
       >
-        <View className="flex-1 justify-end bg-black/70 px-4 pb-6">
-          <View className="max-h-[80%] rounded-[24px] border border-white/10 bg-black px-4 py-4">
+        <View className="flex-1 justify-end bg-aventi-overlay px-4 pb-6">
+          <View className="max-h-[80%] rounded-[24px] border border-aventi-border bg-aventi-canvas px-4 py-4">
             <View className="mb-3 flex-row items-start justify-between gap-3">
               <View className="flex-1">
                 <Text className="text-xs uppercase tracking-[2px] text-white/55">Report Event</Text>
@@ -474,7 +474,7 @@ export default function FavoritesScreen() {
               <Pressable
                 disabled={reportMutation.isPending}
                 onPress={handleCloseReport}
-                className="rounded-full border border-white/10 bg-white/5 px-3 py-2 active:scale-95"
+                className="rounded-full border border-aventi-border bg-aventi-glass px-3 py-2 active:scale-95"
               >
                 <Text className="text-[10px] font-semibold uppercase tracking-[1px] text-white/85">Close</Text>
               </Pressable>
@@ -491,7 +491,7 @@ export default function FavoritesScreen() {
                       disabled={reportMutation.isPending}
                       onPress={() => setReportReason(option.value)}
                       className={`rounded-2xl border px-4 py-3 ${
-                        selected ? 'border-amber-200/35 bg-amber-300/10' : 'border-white/10 bg-white/5 active:scale-[0.99]'
+                        selected ? 'border-amber-200/35 bg-amber-300/10' : 'border-aventi-border bg-aventi-glass active:scale-[0.99]'
                       }`}
                     >
                       <Text className={`text-sm font-semibold ${selected ? 'text-amber-100/95' : 'text-white/90'}`}>
@@ -517,14 +517,14 @@ export default function FavoritesScreen() {
                 textAlignVertical="top"
                 value={reportDetails}
                 onChangeText={setReportDetails}
-                className="min-h-[96px] rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white"
+                className="min-h-[96px] rounded-2xl border border-aventi-border bg-aventi-glass px-4 py-3 text-sm text-white"
               />
 
               <View className="mt-4 flex-row gap-3 pb-1">
                 <Pressable
                   disabled={reportMutation.isPending}
                   onPress={handleCloseReport}
-                  className="flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 active:scale-[0.99]"
+                  className="flex-1 rounded-2xl border border-aventi-border bg-aventi-glass px-4 py-3 active:scale-[0.99]"
                 >
                   <Text className="text-center text-xs font-semibold uppercase tracking-[1.2px] text-white/85">
                     Cancel
@@ -535,7 +535,7 @@ export default function FavoritesScreen() {
                   onPress={handleSubmitReport}
                   className={`flex-1 rounded-2xl border px-4 py-3 ${
                     reportMutation.isPending
-                      ? 'border-white/5 bg-white/5'
+                      ? 'border-white/5 bg-aventi-glass'
                       : 'border-amber-200/30 bg-amber-300/10 active:scale-[0.99]'
                   }`}
                 >

@@ -93,7 +93,7 @@ export default function ProfileScreen() {
   };
 
   return (
-    <View className="flex-1 px-4 pt-14 bg-black">
+    <View className="flex-1 px-4 pt-14 bg-aventi-canvas">
       {/* Header */}
       <View className="flex-row justify-between items-center mb-6">
         <Pressable
@@ -102,7 +102,7 @@ export default function ProfileScreen() {
         >
           <Ionicons name="chevron-back" size={24} color="white" />
         </Pressable>
-        <Text className="text-sm font-semibold uppercase tracking-[2px] text-white">Profile & Settings</Text>
+        <Text className="text-sm text-white" style={{ fontFamily: 'Poppins_600SemiBold' }}>Profile & Settings</Text>
         <View className="w-10" />
       </View>
 
@@ -123,7 +123,7 @@ export default function ProfileScreen() {
             <View className="gap-2">
               <Pressable
                 onPress={handleAuthAction}
-                className="px-4 py-3 rounded-full border border-white/15 bg-white/10 active:scale-95"
+                className="px-4 py-3 rounded-full border border-aventi-borderStrong bg-white/10 active:scale-95"
               >
                 <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white">
                   {authActionLabel}
@@ -142,7 +142,7 @@ export default function ProfileScreen() {
             </Pressable>
             <Pressable
               onPress={handlePremiumRestore}
-              className="flex-1 rounded-2xl border border-white/15 bg-white/5 px-4 py-3 active:scale-[0.99]"
+              className="flex-1 rounded-2xl border border-aventi-borderStrong bg-aventi-glass px-4 py-3 active:scale-[0.99]"
             >
               <Text className="text-center text-[11px] font-semibold uppercase tracking-[1.2px] text-white/90">
                 Restore Premium
@@ -186,7 +186,7 @@ export default function ProfileScreen() {
             </View>
             <Pressable
               onPress={handleOpenLocationSetup}
-              className="px-4 py-3 rounded-full border border-white/15 bg-white/10 active:scale-95"
+              className="px-4 py-3 rounded-full border border-aventi-borderStrong bg-white/10 active:scale-95"
             >
               <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white">
                 Location & Travel

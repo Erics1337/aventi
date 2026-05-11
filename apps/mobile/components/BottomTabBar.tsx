@@ -1,6 +1,8 @@
 import { Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { aventiColors, aventiGradients } from '@aventi/design-tokens';
 
 type TabBarProps = {
   state: { index: number; routes: { key: string; name: string }[] };
@@ -10,10 +12,10 @@ type TabBarProps = {
 };
 
 const TABS = [
-  { name: 'index', label: 'DISCOVERY', icon: 'compass' as const },
-  { name: 'search', label: 'SEARCH', icon: 'search' as const },
-  { name: 'favorites', label: 'SAVED', icon: 'bookmark' as const },
-  { name: 'profile', label: 'PROFILE', icon: 'person' as const },
+  { name: 'index', label: 'Discover', icon: 'compass' as const },
+  { name: 'search', label: 'Search', icon: 'search' as const },
+  { name: 'favorites', label: 'Saved', icon: 'bookmark' as const },
+  { name: 'profile', label: 'Profile', icon: 'person' as const },
 ] as const;
 
 export function BottomTabBar({ state, descriptors, navigation }: TabBarProps) {
@@ -23,13 +25,15 @@ export function BottomTabBar({ state, descriptors, navigation }: TabBarProps) {
     <View
       style={{
         flexDirection: 'row',
-        backgroundColor: '#0f0f0f',
+        backgroundColor: aventiColors.canvas,
         paddingBottom: insets.bottom + 8,
         paddingTop: 12,
         paddingHorizontal: 16,
-        borderTopWidth: 0,
+        borderTopWidth: 1,
+        borderTopColor: aventiColors.border,
         alignItems: 'center',
         justifyContent: 'space-between',
+        boxShadow: '0 -18px 44px rgba(0,0,0,0.34)',
       }}
     >
       {state.routes.map((route: { key: string; name: string }, index: number) => {
@@ -64,20 +68,28 @@ export function BottomTabBar({ state, descriptors, navigation }: TabBarProps) {
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: 8,
-                backgroundColor: '#2d0a4e',
                 borderRadius: 20,
+                overflow: 'hidden',
                 paddingVertical: 10,
                 paddingHorizontal: 16,
                 marginHorizontal: 4,
+                minHeight: 44,
               }}
             >
-              <Ionicons name={tab.icon} size={18} color="#e8c6ff" />
+              <LinearGradient
+                colors={aventiGradients.primary as unknown as [string, string, string]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={{ position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, opacity: 0.92 }}
+              />
+              <Ionicons name={tab.icon} size={18} color="#FFFFFF" />
               <Text
                 style={{
-                  color: '#e8c6ff',
-                  fontSize: 12,
+                  color: '#FFFFFF',
+                  fontSize: 11,
                   fontWeight: '700',
-                  letterSpacing: 0.8,
+                  letterSpacing: 0,
+                  fontFamily: 'Poppins_700Bold',
                 }}
               >
                 {tab.label}
@@ -100,15 +112,17 @@ export function BottomTabBar({ state, descriptors, navigation }: TabBarProps) {
               paddingVertical: 10,
               marginHorizontal: 4,
               gap: 4,
+              minHeight: 44,
             }}
           >
-            <Ionicons name={tab.icon} size={20} color="#6b6b6b" />
+            <Ionicons name={tab.icon} size={20} color="rgba(229,231,235,0.62)" />
             <Text
               style={{
-                color: '#6b6b6b',
+                color: 'rgba(229,231,235,0.62)',
                 fontSize: 10,
                 fontWeight: '600',
-                letterSpacing: 0.6,
+                letterSpacing: 0,
+                fontFamily: 'Poppins_600SemiBold',
               }}
             >
               {tab.label}

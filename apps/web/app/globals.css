@@ -1,14 +1,25 @@
 @import url('https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800&display=swap');
 @import "tailwindcss";
 
-/* Aventi Style Guide v1 — shared with @aventi/design-tokens */
+/* Aventi Style Guide v2 — shared with @aventi/design-tokens */
 @theme {
   /* Marketing brand (the website) */
-  --color-aventi-white: #f1f1f1;
-  --color-black-grey: #171d1a;
-  --color-dark-green: #195339;
-  --color-green: #3a906a;
-  --color-mellow-yellow: #f9d846;
+  --color-forest: #032f25;
+  --color-pine: #214437;
+  --color-sage: #9aaa8f;
+  --color-moss: #b8ba96;
+  --color-sand: #ede3d1;
+  --color-clay: #b94a31;
+  --color-mellow: #e3ad43;
+  --color-ocean: #164a57;
+  --color-charcoal: #1f211f;
+  --color-cream: #f5f0e7;
+
+  --color-aventi-white: var(--color-cream);
+  --color-black-grey: var(--color-charcoal);
+  --color-dark-green: var(--color-forest);
+  --color-green: var(--color-pine);
+  --color-mellow-yellow: var(--color-mellow);
 
   --color-brand-paper: var(--color-aventi-white);
   --color-brand-ink: var(--color-black-grey);
@@ -16,8 +27,8 @@
   --color-brand-primary: var(--color-dark-green);
   --color-brand-secondary: var(--color-green);
 
-  --color-surface-mist: #e7ece6;
-  --color-surface-sage: #dfe8dd;
+  --color-surface-mist: #f0eadf;
+  --color-surface-sage: #e4e3d1;
   --color-device-bezel: #111611;
 
   --text-display: 4.44rem;
@@ -40,22 +51,22 @@
   --radius-aventi-card: 28px;
   --radius-aventi-panel: 16px;
 
-  /* App brand (dark immersive — feed, profile, saved, filters, discovery, admin) */
-  --color-app-bg: #07070d;
-  --color-app-bg-elev: #0d0d18;
-  --color-app-surface: rgba(255, 255, 255, 0.04);
-  --color-app-surface-2: rgba(255, 255, 255, 0.07);
-  --color-app-border: rgba(255, 255, 255, 0.08);
-  --color-app-border-strong: rgba(255, 255, 255, 0.14);
-  --color-app-text: rgba(255, 255, 255, 0.95);
-  --color-app-text-muted: rgba(255, 255, 255, 0.55);
-  --color-app-text-faint: rgba(255, 255, 255, 0.35);
+  /* App brand (mobile/web product surfaces) */
+  --color-app-bg: var(--color-forest);
+  --color-app-bg-elev: #08392e;
+  --color-app-surface: rgba(245, 240, 231, 0.07);
+  --color-app-surface-2: rgba(245, 240, 231, 0.12);
+  --color-app-border: rgba(245, 240, 231, 0.12);
+  --color-app-border-strong: rgba(245, 240, 231, 0.22);
+  --color-app-text: rgba(245, 240, 231, 0.96);
+  --color-app-text-muted: rgba(245, 240, 231, 0.62);
+  --color-app-text-faint: rgba(245, 240, 231, 0.38);
 
-  --color-violet: #6b4bff;
-  --color-violet-bright: #a67cff;
-  --color-violet-deep: #4a2fd6;
-  --color-success-neon: #4dffa8;
-  --color-danger-glow: #ff4d6d;
+  --color-violet: var(--color-forest);
+  --color-violet-bright: var(--color-mellow);
+  --color-violet-deep: var(--color-pine);
+  --color-success-neon: var(--color-sage);
+  --color-danger-glow: var(--color-clay);
 
   --font-sans: Poppins, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
@@ -69,18 +80,18 @@
   --dur-slow: 320ms;
 
   /* Gradients */
-  --gradient-premium: linear-gradient(120deg, #f9d846 0%, #b98fff 55%, #6b4bff 100%);
-  --gradient-violet: linear-gradient(120deg, #6b4bff 0%, #8e5cff 55%, #a67cff 100%);
-  --gradient-glow-red: linear-gradient(120deg, #ff4d6d 0%, #ff7a8b 100%);
+  --gradient-premium: linear-gradient(120deg, #032f25 0%, #214437 48%, #e3ad43 100%);
+  --gradient-violet: linear-gradient(120deg, #032f25 0%, #214437 62%, #164a57 100%);
+  --gradient-glow-red: linear-gradient(120deg, #b94a31 0%, #e3ad43 100%);
 
   /* Radii (pair) */
   --radius-card: 16px;
   --radius-pill: 9999px;
 
   /* Glow shadows */
-  --glow-violet: 0 20px 60px rgba(107, 75, 255, 0.35);
-  --glow-success: 0 0 24px rgba(77, 255, 168, 0.35);
-  --glow-danger: 0 0 18px rgba(255, 77, 109, 0.45);
+  --glow-violet: 0 20px 60px rgba(3, 47, 37, 0.28);
+  --glow-success: 0 0 24px rgba(154, 170, 143, 0.28);
+  --glow-danger: 0 0 18px rgba(185, 74, 49, 0.32);
 }
 
 *,

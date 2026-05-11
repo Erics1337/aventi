@@ -1,6 +1,7 @@
 import { BlurView } from 'expo-blur';
 import type { PropsWithChildren } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { aventiColors } from '@aventi/design-tokens';
 
 interface GlassPanelProps extends PropsWithChildren {
   className?: string;
@@ -18,13 +19,14 @@ export function GlassPanel({ children, className }: GlassPanelProps) {
 
 const styles = StyleSheet.create({
   outer: {
-    borderRadius: 22,
+    borderRadius: 24,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderColor: aventiColors.border,
+    backgroundColor: aventiColors.glass,
+    boxShadow: '0 14px 42px rgba(0,0,0,0.28)',
   },
   blur: {
-    padding: 14,
+    padding: 16,
   },
 });

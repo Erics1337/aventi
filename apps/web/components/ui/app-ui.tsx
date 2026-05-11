@@ -3,9 +3,8 @@
 import type { ButtonHTMLAttributes, AnchorHTMLAttributes, ReactNode } from 'react';
 
 /**
- * App-surface design system primitives.
- * Use across the dark immersive surfaces (/feed, /profile, /saved, /filters, /discovery, /admin).
- * Marketing site (/) keeps its own light brand styling.
+ * Shared Aventi product primitives.
+ * Moodboard v2: forest, cream, mellow gold, clay, sage. Calm editorial surfaces.
  */
 
 // Type scale — Poppins, sentence case throughout. Use these classNames directly.
@@ -48,9 +47,9 @@ const sizeClasses: Record<ButtonSize, string> = {
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary:
-    'bg-[var(--color-violet)] text-white hover:bg-[var(--color-violet-bright)] active:scale-[0.98] shadow-[var(--glow-violet)]',
+    'bg-[var(--color-mellow)] text-[var(--color-charcoal)] hover:brightness-105 active:scale-[0.98] shadow-[0_18px_44px_rgba(227,173,67,0.24)]',
   premium:
-    'text-white active:scale-[0.98] shadow-[var(--glow-violet)] [background:var(--gradient-premium)] hover:brightness-110',
+    'text-[var(--color-cream)] active:scale-[0.98] shadow-[var(--glow-violet)] [background:var(--gradient-premium)] hover:brightness-110',
   secondary:
     'bg-[var(--color-app-surface)] text-[var(--color-app-text)] border border-[var(--color-app-border)] hover:bg-[var(--color-app-surface-2)] active:scale-[0.98]',
   ghost:
@@ -155,11 +154,11 @@ const pillTones: Record<NonNullable<PillProps['tone']>, string> = {
   neutral:
     'bg-[var(--color-app-surface)] text-[var(--color-app-text-muted)] border border-[var(--color-app-border)]',
   violet:
-    'bg-[rgba(107,75,255,0.14)] text-[var(--color-violet-bright)] border border-[rgba(107,75,255,0.28)]',
+    'bg-[rgba(227,173,67,0.14)] text-[var(--color-mellow)] border border-[rgba(227,173,67,0.28)]',
   success:
-    'bg-[rgba(77,255,168,0.10)] text-[var(--color-success-neon)] border border-[rgba(77,255,168,0.28)] shadow-[var(--glow-success)]',
+    'bg-[rgba(154,170,143,0.12)] text-[var(--color-sage)] border border-[rgba(154,170,143,0.30)] shadow-[var(--glow-success)]',
   danger:
-    'bg-[rgba(255,77,109,0.10)] text-[var(--color-danger-glow)] border border-[rgba(255,77,109,0.30)]',
+    'bg-[rgba(185,74,49,0.12)] text-[var(--color-clay)] border border-[rgba(185,74,49,0.30)]',
   premium:
     'text-white border-0 [background:var(--gradient-premium)]',
 };

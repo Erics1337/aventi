@@ -636,20 +636,8 @@ export default function HomeScreen() {
     [handleRefreshFeed, isNearFeedEnd, readScrollMetrics],
   );
 
-  const handleOpenProfile = () => {
-    router.push('/profile');
-  };
-
   const handleOpenLocationSetup = () => {
     router.push('/onboarding/location');
-  };
-
-  const handleOpenFavorites = () => {
-    if (!auth.requireSessionBackedGuestOrAccount('favorites')) {
-      setUiNotice('Start a guest session or sign in to open Favorites.');
-      return;
-    }
-    router.push('/favorites');
   };
 
   const handleDismissUpgradePrompt = async () => {
@@ -735,7 +723,7 @@ export default function HomeScreen() {
           <View className="flex-1">
             <EventCard event={item} />
 
-            <View className="absolute top-3 left-3 px-3 py-1 rounded-full border border-white/10 bg-black/45">
+            <View className="absolute top-3 left-3 px-3 py-1 rounded-full border border-aventi-border bg-aventi-overlay">
               <Text className="text-[10px] uppercase tracking-[1.2px] text-white/80">
                 {formatEventTiming(item.startsAt, item.endsAt, new Date(nowTick))}
               </Text>
@@ -779,8 +767,8 @@ export default function HomeScreen() {
     if (isManualRefreshing && feedQuery.isFetching && timelineEvents.length > 0) {
       return (
         <View className="items-center pt-4 pb-8">
-          <View className="w-full items-center rounded-[20px] border border-white/10 bg-white/5 px-6 py-5">
-            <Text className="text-center text-[11px] font-bold uppercase tracking-[1.4px] text-[#A67CFF]">
+          <View className="w-full items-center rounded-[20px] border border-aventi-border bg-aventi-glass px-6 py-5">
+            <Text className="text-center text-[11px] font-bold uppercase tracking-[1.4px] text-aventi-pink">
               {serverCallsEnabled ? 'Mining New Events...' : 'Refreshing Feed...'}
             </Text>
             <Text className="mt-1.5 text-center text-[10px] uppercase tracking-[1px] text-white/40">
@@ -808,8 +796,8 @@ export default function HomeScreen() {
       if (feedQuery.data?.inventoryStatus === 'targeted_warming') {
         return (
           <View className="items-center pt-4 pb-8">
-            <View className="w-full items-center rounded-[20px] border border-white/10 bg-white/5 px-6 py-5">
-              <Text className="text-center text-[11px] font-bold uppercase tracking-[1.4px] text-[#A67CFF]">
+            <View className="w-full items-center rounded-[20px] border border-aventi-border bg-aventi-glass px-6 py-5">
+              <Text className="text-center text-[11px] font-bold uppercase tracking-[1.4px] text-aventi-pink">
                 Mining Filtered Events...
               </Text>
               <Text className="text-center text-[10px] uppercase tracking-[1px] text-white/40 mt-1.5">
@@ -824,11 +812,11 @@ export default function HomeScreen() {
       }
       return (
         <View className="items-center pt-4 pb-8">
-          <View className="w-full items-center rounded-[20px] border border-white/10 bg-white/5 px-6 py-6">
+          <View className="w-full items-center rounded-[20px] border border-aventi-border bg-aventi-glass px-6 py-6">
             <Ionicons
               name={isFooterPullPrimed ? 'arrow-up-circle-outline' : 'chevron-down'}
               size={22}
-              color={isFooterPullPrimed ? '#A67CFF' : 'rgba(255,255,255,0.35)'}
+              color={isFooterPullPrimed ? '#B94A31' : 'rgba(255,255,255,0.35)'}
             />
             <Text className="mt-3 text-center text-[11px] uppercase tracking-[1.4px] text-white/45">
               End of current feed
@@ -844,7 +832,7 @@ export default function HomeScreen() {
             </Text>
             {isFooterPullPrimed ? (
               <View className="mt-4 h-1 w-full max-w-[220px] overflow-hidden rounded-full bg-white/10">
-                <View className="h-full w-full rounded-full bg-[#A67CFF]" />
+                <View className="h-full w-full rounded-full bg-aventi-pink" />
               </View>
             ) : null}
           </View>
@@ -913,28 +901,12 @@ export default function HomeScreen() {
   ];
 
   return (
-    <View className="flex-1 px-4 pt-14 bg-black">
-      <View className="flex-row justify-between items-center mb-2">
-        <View>
-          <Text className="text-xs uppercase tracking-[3px] text-white/55">Aventi</Text>
-          <Text className="mt-2 text-2xl font-bold uppercase tracking-[2px] text-white">
-            {headerLabel}
-          </Text>
-        </View>
-        <View className="flex-row gap-3">
-          <Pressable
-            onPress={handleOpenFavorites}
-            className="justify-center items-center w-10 h-10 rounded-full bg-white/10 active:scale-95"
-          >
-            <Ionicons name="heart-outline" size={24} color="white" />
-          </Pressable>
-          <Pressable
-            onPress={handleOpenProfile}
-            className="justify-center items-center w-10 h-10 rounded-full bg-white/10 active:scale-95"
-          >
-            <Ionicons name="person-outline" size={22} color="white" />
-          </Pressable>
-        </View>
+    <View className="flex-1 bg-aventi-canvas px-4 pt-14">
+      <View className="mb-2">
+        <Text className="text-xs uppercase tracking-[2px] text-aventi-pink">Aventi</Text>
+        <Text className="mt-2 text-[28px] leading-[32px] text-white" style={{ fontFamily: 'Poppins_700Bold' }}>
+          {headerLabel}
+        </Text>
       </View>
 
       <View className="flex-row flex-wrap gap-2 mb-4">
@@ -943,10 +915,10 @@ export default function HomeScreen() {
             key={`${chip.label}-${index}`}
             onPress={chip.onPress}
             className={`rounded-full border px-3 py-2 active:scale-95 ${
-              chip.premium ? 'border-[#A67CFF]/30 bg-[#A67CFF]/10' : 'border-white/10 bg-white/5'
+              chip.premium ? 'border-aventi-violet/35 bg-aventi-violet/15' : 'border-aventi-border bg-aventi-glass'
             }`}
           >
-            <Text className={`text-[11px] uppercase tracking-[1.2px] ${chip.premium ? 'text-[#A67CFF]/80' : 'text-white/75'}`}>
+            <Text className={`text-[11px] uppercase tracking-[1.2px] ${chip.premium ? 'text-aventi-violet' : 'text-white/75'}`}>
               {chip.label}
             </Text>
           </Pressable>
@@ -954,11 +926,11 @@ export default function HomeScreen() {
       </View>
 
       {showMiningBanner ? (
-        <View className="mb-4 rounded-[20px] border border-white/10 bg-white/5 px-4 py-3">
+        <View className="mb-4 rounded-[20px] border border-aventi-border bg-aventi-glass px-4 py-3">
           <View className="flex-row gap-3 items-center">
             <LoadingProgressBar width={88} />
             <View className="flex-1">
-              <Text className="text-[11px] font-bold uppercase tracking-[1.4px] text-[#A67CFF]">
+              <Text className="text-[11px] font-bold uppercase tracking-[1.4px] text-aventi-pink">
                 {serverCallsEnabled ? 'Mining New Events' : 'Refreshing Feed'}
               </Text>
               <Text className="mt-1 text-[11px] leading-4 text-white/55">
@@ -974,10 +946,10 @@ export default function HomeScreen() {
       ) : null}
 
       {upgradePromptVisible ? (
-        <View className="mb-4 rounded-[20px] border border-amber-200/20 bg-amber-400/10 px-4 py-4">
+        <View className="mb-4 rounded-[20px] border border-aventi-orange/25 bg-aventi-orange/10 px-4 py-4">
           <View className="flex-row gap-3 items-start">
             <View className="flex-1">
-              <Text className="text-[12px] font-semibold uppercase tracking-[1.4px] text-amber-100/95">
+              <Text className="text-[12px] font-semibold uppercase tracking-[1.4px] text-aventi-orange">
                 Love these picks?
               </Text>
               <Text className="mt-1.5 text-sm leading-5 text-white/85">
@@ -986,15 +958,15 @@ export default function HomeScreen() {
               <View className="flex-row gap-2 mt-3">
                 <Pressable
                   onPress={handleUpgradeFromPrompt}
-                  className="rounded-xl border border-amber-200/30 bg-amber-400/20 px-4 py-2.5 active:scale-95"
+                  className="rounded-xl border border-aventi-orange/30 bg-aventi-orange/20 px-4 py-2.5 active:scale-95"
                 >
-                  <Text className="text-xs font-semibold uppercase tracking-[1.2px] text-amber-100">
+                  <Text className="text-xs font-semibold uppercase tracking-[1.2px] text-white">
                     Create Free Account
                   </Text>
                 </Pressable>
                 <Pressable
                   onPress={handleDismissUpgradePrompt}
-                  className="rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 active:scale-95"
+                  className="rounded-xl border border-aventi-border bg-aventi-glass px-4 py-2.5 active:scale-95"
                 >
                   <Text className="text-xs font-semibold uppercase tracking-[1.2px] text-white/65">
                     Keep Browsing
@@ -1030,7 +1002,7 @@ export default function HomeScreen() {
               </Text>
               <Pressable
                 onPress={() => auth.openAuthPrompt('welcome')}
-                className="self-start px-4 py-3 mt-4 rounded-full border border-white/15 bg-white/10 active:scale-95"
+                className="self-start px-4 py-3 mt-4 rounded-full border border-aventi-borderStrong bg-white/10 active:scale-95"
               >
                 <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white">
                   Open Guest Auth
@@ -1049,7 +1021,7 @@ export default function HomeScreen() {
             </Text>
             <Pressable
               onPress={handleOpenLocationSetup}
-              className="self-start px-4 py-3 mt-4 rounded-full border border-white/15 bg-white/10 active:scale-95"
+              className="self-start px-4 py-3 mt-4 rounded-full border border-aventi-borderStrong bg-white/10 active:scale-95"
             >
               <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white">
                 Open Location Setup
@@ -1075,7 +1047,7 @@ export default function HomeScreen() {
             </Text>
             <Pressable
               onPress={() => feedQuery.refetch()}
-              className="self-start px-4 py-3 mt-4 rounded-full border border-white/15 bg-white/10 active:scale-95"
+              className="self-start px-4 py-3 mt-4 rounded-full border border-aventi-borderStrong bg-white/10 active:scale-95"
             >
               <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white">Retry</Text>
             </Pressable>
@@ -1152,7 +1124,7 @@ export default function HomeScreen() {
             <View className="flex-row gap-3 mt-4">
               <Pressable
                 onPress={() => setFilterSheetVisible(true)}
-                className="px-4 py-3 rounded-full border border-white/15 bg-white/5 active:scale-95"
+                className="px-4 py-3 rounded-full border border-aventi-borderStrong bg-aventi-glass active:scale-95"
               >
                 <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white/85">
                   Edit Filters
@@ -1160,9 +1132,9 @@ export default function HomeScreen() {
               </Pressable>
               <Pressable
                 onPress={handleClearFilters}
-                className="rounded-full border border-[#A67CFF]/40 bg-[#A67CFF]/10 px-4 py-3 active:scale-95"
+                className="rounded-full border border-aventi-pink/40 bg-aventi-pink/10 px-4 py-3 active:scale-95"
               >
-                <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-[#A67CFF]">
+                <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-aventi-pink">
                   Clear Filters
                 </Text>
               </Pressable>
@@ -1180,7 +1152,7 @@ export default function HomeScreen() {
             <View className="flex-row gap-3 mt-4">
               <Pressable
                 onPress={() => handleRefreshFeed()}
-                className="px-4 py-3 rounded-full border border-white/15 bg-white/5 active:scale-95"
+                className="px-4 py-3 rounded-full border border-aventi-borderStrong bg-aventi-glass active:scale-95"
               >
                 <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white/85">
                   Refresh Feed
@@ -1188,9 +1160,9 @@ export default function HomeScreen() {
               </Pressable>
               <Pressable
                 onPress={handleResetSeenEvents}
-                className="rounded-full border border-[#A67CFF]/40 bg-[#A67CFF]/10 px-4 py-3 active:scale-95"
+                className="rounded-full border border-aventi-pink/40 bg-aventi-pink/10 px-4 py-3 active:scale-95"
               >
-                <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-[#A67CFF]">
+                <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-aventi-pink">
                   Reset Seen
                 </Text>
               </Pressable>

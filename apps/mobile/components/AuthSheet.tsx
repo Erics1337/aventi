@@ -191,7 +191,7 @@ export function AuthSheet() {
     >
       <KeyboardAvoidingView
         behavior={Platform.select({ ios: 'padding', default: undefined })}
-        className="flex-1 justify-end bg-black/90 px-4 pb-6 pt-16"
+        className="flex-1 justify-end bg-aventi-overlay px-4 pb-6 pt-16"
       >
         <GlassPanel>
           <View className="gap-4">

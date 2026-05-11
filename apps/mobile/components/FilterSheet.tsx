@@ -103,7 +103,7 @@ export function FilterSheet({ visible, filters, onClose, onApply, isPremium }: P
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <BlurView intensity={60} tint="dark" style={{ flex: 1 }}>
         <View className="flex-1 justify-end">
-          <View className="max-h-[85%] rounded-t-[28px] border-t border-white/10 bg-black/95">
+          <View className="max-h-[85%] rounded-t-[28px] border-t border-aventi-border bg-aventi-overlay">
             {/* Drag handle */}
             <View className="items-center py-3">
               <View className="h-1 w-10 rounded-full bg-white/20" />
@@ -131,13 +131,13 @@ export function FilterSheet({ visible, filters, onClose, onApply, isPremium }: P
                       onPress={() => handleDateChange(option.value)}
                       className={`rounded-full border px-4 py-2.5 ${
                         filters.date === option.value
-                          ? 'border-[#A67CFF] bg-[#A67CFF]/20'
-                          : 'border-white/15 bg-white/5'
+                          ? 'border-aventi-mellow bg-aventi-mellow/20'
+                          : 'border-aventi-borderStrong bg-aventi-glass'
                       }`}
                     >
                       <Text
                         className={`text-xs uppercase tracking-[1px] ${
-                          filters.date === option.value ? 'text-[#A67CFF]' : 'text-white/70'
+                          filters.date === option.value ? 'text-aventi-mellow' : 'text-white/70'
                         }`}
                       >
                         {option.label}
@@ -157,13 +157,13 @@ export function FilterSheet({ visible, filters, onClose, onApply, isPremium }: P
                       onPress={() => handleTimeChange(option.value)}
                       className={`rounded-full border px-4 py-2.5 ${
                         filters.timeOfDay === option.value
-                          ? 'border-[#A67CFF] bg-[#A67CFF]/20'
-                          : 'border-white/15 bg-white/5'
+                          ? 'border-aventi-mellow bg-aventi-mellow/20'
+                          : 'border-aventi-borderStrong bg-aventi-glass'
                       }`}
                     >
                       <Text
                         className={`text-xs uppercase tracking-[1px] ${
-                          filters.timeOfDay === option.value ? 'text-[#A67CFF]' : 'text-white/70'
+                          filters.timeOfDay === option.value ? 'text-aventi-mellow' : 'text-white/70'
                         }`}
                       >
                         {option.label}
@@ -183,13 +183,13 @@ export function FilterSheet({ visible, filters, onClose, onApply, isPremium }: P
                       onPress={() => handlePriceChange(option.value)}
                       className={`rounded-full border px-4 py-2.5 ${
                         filters.price === option.value
-                          ? 'border-[#A67CFF] bg-[#A67CFF]/20'
-                          : 'border-white/15 bg-white/5'
+                          ? 'border-aventi-mellow bg-aventi-mellow/20'
+                          : 'border-aventi-borderStrong bg-aventi-glass'
                       }`}
                     >
                       <Text
                         className={`text-xs uppercase tracking-[1px] ${
-                          filters.price === option.value ? 'text-[#A67CFF]' : 'text-white/70'
+                          filters.price === option.value ? 'text-aventi-mellow' : 'text-white/70'
                         }`}
                       >
                         {option.label}
@@ -204,8 +204,8 @@ export function FilterSheet({ visible, filters, onClose, onApply, isPremium }: P
                 <View className="mb-3 flex-row items-center gap-2">
                   <Text className="text-[11px] uppercase tracking-[2px] text-white/50">Search Radius</Text>
                   {!canUseAdvancedFilters && (
-                    <View className="rounded-full bg-[#A67CFF]/20 px-2 py-0.5">
-                      <Text className="text-[9px] uppercase tracking-[1px] text-[#A67CFF]">Premium</Text>
+                    <View className="rounded-full bg-aventi-mellow/20 px-2 py-0.5">
+                      <Text className="text-[9px] uppercase tracking-[1px] text-aventi-mellow">Premium</Text>
                     </View>
                   )}
                 </View>
@@ -216,16 +216,16 @@ export function FilterSheet({ visible, filters, onClose, onApply, isPremium }: P
                       onPress={() => canUseAdvancedFilters && handleRadiusChange(miles)}
                       className={`rounded-full border px-4 py-2.5 ${
                         filters.radiusMiles === miles
-                          ? 'border-[#A67CFF] bg-[#A67CFF]/20'
+                          ? 'border-aventi-mellow bg-aventi-mellow/20'
                           : canUseAdvancedFilters
-                            ? 'border-white/15 bg-white/5'
-                            : 'border-white/8 bg-white/3'
+                            ? 'border-aventi-borderStrong bg-aventi-glass'
+                            : 'border-white/10 bg-white/5'
                       }`}
                     >
                       <Text
                         className={`text-xs uppercase tracking-[1px] ${
                           filters.radiusMiles === miles
-                            ? 'text-[#A67CFF]'
+                            ? 'text-aventi-mellow'
                             : canUseAdvancedFilters
                               ? 'text-white/70'
                               : 'text-white/40'
@@ -253,12 +253,12 @@ export function FilterSheet({ visible, filters, onClose, onApply, isPremium }: P
                         key={option.value}
                         onPress={() => toggleVibe(option.value)}
                         className={`rounded-full border px-4 py-2.5 ${
-                          selected ? 'border-[#A67CFF] bg-[#A67CFF]/20' : 'border-white/15 bg-white/5'
+                          selected ? 'border-aventi-mellow bg-aventi-mellow/20' : 'border-aventi-borderStrong bg-aventi-glass'
                         }`}
                       >
                         <Text
                           className={`text-xs uppercase tracking-[1px] ${
-                            selected ? 'text-[#A67CFF]' : 'text-white/70'
+                            selected ? 'text-aventi-mellow' : 'text-white/70'
                           }`}
                         >
                           {option.label}
@@ -279,12 +279,12 @@ export function FilterSheet({ visible, filters, onClose, onApply, isPremium }: P
                         key={option.value}
                         onPress={() => toggleCategory(option.value)}
                         className={`rounded-full border px-4 py-2.5 ${
-                          selected ? 'border-[#A67CFF] bg-[#A67CFF]/20' : 'border-white/15 bg-white/5'
+                          selected ? 'border-aventi-mellow bg-aventi-mellow/20' : 'border-aventi-borderStrong bg-aventi-glass'
                         }`}
                       >
                         <Text
                           className={`text-xs uppercase tracking-[1px] ${
-                            selected ? 'text-[#A67CFF]' : 'text-white/70'
+                            selected ? 'text-aventi-mellow' : 'text-white/70'
                           }`}
                         >
                           {option.label}

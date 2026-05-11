@@ -78,9 +78,9 @@ export default function LocationOnboardingScreen() {
   };
 
   return (
-    <ScrollView className="flex-1 px-4 pt-14 bg-black" contentContainerStyle={{ paddingBottom: 24 }}>
-      <Text className="text-xs uppercase tracking-[3px] text-white/55">Aventi</Text>
-      <Text className="mt-2 text-3xl font-bold uppercase tracking-[2px] text-white">
+    <ScrollView className="flex-1 px-4 pt-14 bg-aventi-canvas" contentContainerStyle={{ paddingBottom: 24 }}>
+      <Text className="text-xs uppercase tracking-[2px] text-aventi-pink">Aventi</Text>
+      <Text className="mt-2 text-[30px] leading-[34px] text-white" style={{ fontFamily: 'Poppins_700Bold' }}>
         {heading}
       </Text>
       <Text className="mt-3 text-sm leading-5 text-white/70">
@@ -129,7 +129,7 @@ export default function LocationOnboardingScreen() {
                 onPress={() => {
                   void location.requestDeviceLocation();
                 }}
-                className="px-4 py-3 rounded-full border border-white/15 bg-white/10 active:scale-95"
+                className="px-4 py-3 rounded-full border border-aventi-borderStrong bg-white/10 active:scale-95"
               >
                 <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white">
                   {location.deviceLocation ? 'Refresh Device Location' : 'Enable Location'}
@@ -140,7 +140,7 @@ export default function LocationOnboardingScreen() {
                 onPress={() => {
                   void location.recheckPermissionAndLocation();
                 }}
-                className="px-4 py-3 rounded-full border border-white/15 bg-white/5 active:scale-95"
+                className="px-4 py-3 rounded-full border border-aventi-borderStrong bg-aventi-glass active:scale-95"
               >
                 <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white/85">
                   Re-check
@@ -150,7 +150,7 @@ export default function LocationOnboardingScreen() {
               {(location.status === 'denied' || location.status === 'error') && !location.deviceLocation ? (
                 <Pressable
                   onPress={handleOpenSettings}
-                  className="px-4 py-3 rounded-full border border-white/15 bg-white/5 active:scale-95"
+                  className="px-4 py-3 rounded-full border border-aventi-borderStrong bg-aventi-glass active:scale-95"
                 >
                   <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white/85">
                     Open Settings
@@ -162,7 +162,7 @@ export default function LocationOnboardingScreen() {
             {activeLocation ? (
               <Pressable
                 onPress={handleContinue}
-                className="px-4 py-3 mt-1 bg-white rounded-full border border-white/15 active:scale-95"
+                className="px-4 py-3 mt-1 bg-white rounded-full border border-aventi-borderStrong active:scale-95"
               >
                 <Text className="text-center text-xs font-semibold uppercase tracking-[1.6px] text-black">
                   Continue To Feed
@@ -179,7 +179,7 @@ export default function LocationOnboardingScreen() {
           Enter exact coordinates for testing or use a preset destination. These overrides stay on this device and
           drive the feed immediately.
         </Text>
-        <View className="p-4 mt-4 rounded-2xl border border-white/10 bg-white/5">
+        <View className="p-4 mt-4 rounded-2xl border border-aventi-border bg-aventi-glass">
           <Text className="text-xs uppercase tracking-[1.4px] text-white/60">Custom Coordinates</Text>
           <View className="gap-3 mt-3">
             <TextInput
@@ -192,7 +192,7 @@ export default function LocationOnboardingScreen() {
               autoCorrect={false}
               accessibilityLabel="Latitude"
               accessibilityHint="Enter the latitude coordinate for your location"
-              className="px-4 py-3 text-sm text-white rounded-2xl border border-white/10 bg-black/20"
+              className="px-4 py-3 text-sm text-white rounded-2xl border border-aventi-border bg-aventi-overlay"
             />
             <TextInput
               value={travelLongitude}
@@ -204,7 +204,7 @@ export default function LocationOnboardingScreen() {
               autoCorrect={false}
               accessibilityLabel="Longitude"
               accessibilityHint="Enter the longitude coordinate for your location"
-              className="px-4 py-3 text-sm text-white rounded-2xl border border-white/10 bg-black/20"
+              className="px-4 py-3 text-sm text-white rounded-2xl border border-aventi-border bg-aventi-overlay"
             />
             <TextInput
               value={travelLabel}
@@ -215,14 +215,14 @@ export default function LocationOnboardingScreen() {
               autoCorrect={false}
               accessibilityLabel="Market label"
               accessibilityHint="Optional name to identify this location"
-              className="px-4 py-3 text-sm text-white rounded-2xl border border-white/10 bg-black/20"
+              className="px-4 py-3 text-sm text-white rounded-2xl border border-aventi-border bg-aventi-overlay"
             />
             {travelError ? <Text className="text-sm leading-5 text-rose-200/85">{travelError}</Text> : null}
             <Pressable
               onPress={() => {
                 void handleApplyTravelCoordinates();
               }}
-              className="px-4 py-3 rounded-full border border-white/15 bg-white/10 active:scale-95"
+              className="px-4 py-3 rounded-full border border-aventi-borderStrong bg-white/10 active:scale-95"
             >
               <Text className="text-center text-xs font-semibold uppercase tracking-[1.5px] text-white">
                 Use These Coordinates
@@ -241,7 +241,7 @@ export default function LocationOnboardingScreen() {
                   void location.setTravelModeOverride(preset);
                 }}
                 className={`rounded-2xl border px-4 py-3 active:scale-95 ${
-                  active ? 'border-white/30 bg-white/15' : 'border-white/10 bg-white/5'
+                  active ? 'border-white/30 bg-white/15' : 'border-aventi-border bg-aventi-glass'
                 }`}
               >
                 <Text className="text-xs uppercase tracking-[1.4px] text-white/60">
@@ -262,7 +262,7 @@ export default function LocationOnboardingScreen() {
               onPress={() => {
                 void location.setTravelModeOverride(null);
               }}
-              className="px-4 py-3 rounded-full border border-white/15 bg-white/5 active:scale-95"
+              className="px-4 py-3 rounded-full border border-aventi-borderStrong bg-aventi-glass active:scale-95"
             >
               <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white/85">
                 Use Current Location
@@ -274,7 +274,7 @@ export default function LocationOnboardingScreen() {
               onPress={() => {
                 void location.setTravelModeOverride(null);
               }}
-              className="px-4 py-3 rounded-full border border-white/15 bg-white/5 active:scale-95"
+              className="px-4 py-3 rounded-full border border-aventi-borderStrong bg-aventi-glass active:scale-95"
             >
               <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white/85">
                 Clear Travel Coordinates
