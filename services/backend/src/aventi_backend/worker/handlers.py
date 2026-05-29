@@ -11,11 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from aventi_backend.services.gemini import GeminiEventScraper
 from aventi_backend.services.jobs import JobRecord, JobType
+from aventi_backend.services.market_descriptors import build_market_descriptor, market_from_payload
 from aventi_backend.services.market_inventory import (
     MarketWarmupService,
-    build_market_descriptor,
     execute_market_scan,
-    market_from_payload,
 )
 from aventi_backend.services.verification import VerificationService
 

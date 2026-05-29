@@ -2,7 +2,19 @@ import { spawn } from 'node:child_process';
 
 const baseURL = process.env.AVENTI_BACKEND_E2E_BASE_URL ?? 'http://127.0.0.1:8000';
 const shouldStartServer = process.env.AVENTI_BACKEND_E2E_START_SERVER === '1';
-const timeoutMs = Number(process.env.AVENTI_BACKEND_E2E_TIMEOUT_MS ?? 30_000);
+const DEFAULT_TIMEOUT_MS = 30_000;
+let timeoutMs = DEFAULT_TIMEOUT_MS;
+const rawTimeoutMs = process.env.AVENTI_BACKEND_E2E_TIMEOUT_MS;
+if (rawTimeoutMs != null && rawTimeoutMs !== '') {
+  const parsedTimeoutMs = Number(rawTimeoutMs);
+  if (Number.isFinite(parsedTimeoutMs) && parsedTimeoutMs > 0) {
+    timeoutMs = parsedTimeoutMs;
+  } else {
+    console.warn(
+      `Invalid AVENTI_BACKEND_E2E_TIMEOUT_MS="${rawTimeoutMs}", falling back to ${DEFAULT_TIMEOUT_MS}`,
+    );
+  }
+}
 
 let server;
 

@@ -55,7 +55,7 @@ def date_window_for_filters(date_filter: str, now: datetime) -> tuple[datetime, 
         second=0,
         microsecond=0,
     )
-    if saturday < now:
+    if saturday + timedelta(days=2) <= now:
         saturday += timedelta(days=7)
     return saturday, saturday + timedelta(days=2)
 

@@ -4,9 +4,9 @@ from unittest.mock import AsyncMock, patch
 
 from aventi_backend.services.market_inventory import (
     MarketDescriptor,
-    MarketWarmupService,
     execute_market_scan,
 )
+from aventi_backend.services.market_inventory_state import MarketInventoryStateStore
 from aventi_backend.services.providers import (
     MockScraper,
     ProviderConfig,
@@ -48,9 +48,12 @@ class ExecuteMarketScanProviderConfigTests(IsolatedAsyncioTestCase):
         settings = SimpleNamespace(serpapi_api_key=None, enable_verification=True)
 
         with (
-            patch("aventi_backend.services.market_inventory.get_settings", return_value=settings),
+            patch(
+                "aventi_backend.services.market_scan_execution.get_settings",
+                return_value=settings,
+            ),
             patch.object(
-                MarketWarmupService,
+                MarketInventoryStateStore,
                 "refresh_market_inventory_state",
                 new=AsyncMock(return_value=0),
             ),

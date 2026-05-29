@@ -58,6 +58,12 @@ def test_date_window_for_filters_weekend() -> None:
     assert start == datetime(2026, 5, 30, tzinfo=UTC)
     assert end == datetime(2026, 6, 1, tzinfo=UTC)
 
+    saturday_afternoon = datetime(2026, 5, 30, 15, tzinfo=UTC)
+    start, end = date_window_for_filters("weekend", saturday_afternoon)
+
+    assert start == datetime(2026, 5, 30, tzinfo=UTC)
+    assert end == datetime(2026, 6, 1, tzinfo=UTC)
+
 
 def test_candidate_matches_filters_applies_category_vibe_price_and_radius() -> None:
     candidate = DiscoveryCandidate(

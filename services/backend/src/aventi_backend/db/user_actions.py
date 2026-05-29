@@ -3,13 +3,16 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from aventi_backend.core.settings import Settings
-from aventi_backend.db.user_identity import canonical_user_uuid, utc_day_bounds
+from aventi_backend.db.user_identity import (
+    canonical_event_uuid,
+    canonical_user_uuid,
+    utc_day_bounds,
+)
 from aventi_backend.models.schemas import FeedImpressionPayload, SwipePayload
 from aventi_backend.services.personalization import apply_vibe_update
 
@@ -68,7 +71,7 @@ class PreferenceActionService:
             raise PermissionError("Free preference action limit reached")
 
         db_user_id = canonical_user_uuid(user_id)
-        event_uuid = str(UUID(payload.event_id))
+        event_uuid = canonical_event_uuid(payload.event_id)
 
         await self.session.execute(
             text(
@@ -136,7 +139,7 @@ class PreferenceActionService:
         payload: FeedImpressionPayload,
     ) -> dict[str, Any]:
         db_user_id = canonical_user_uuid(user_id)
-        event_uuid = str(UUID(payload.event_id))
+        event_uuid = canonical_event_uuid(payload.event_id)
         await self.session.execute(
             text(
                 """

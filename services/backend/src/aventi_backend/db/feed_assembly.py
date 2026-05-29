@@ -9,36 +9,44 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from aventi_backend.core.settings import Settings
 from aventi_backend.db.feed_query import FeedFilterContext, FeedItemFilter, FeedQueryBuilder
 from aventi_backend.models.schemas import EVENT_VIBE_TAGS
+from aventi_backend.services.market_descriptors import build_market_descriptor
 from aventi_backend.services.market_inventory import (
     ELIGIBLE_VERIFICATION_STATUSES,
     MarketWarmupService,
-    build_market_descriptor,
 )
 
 RemainingFreeSwipes = Callable[[str, Settings, datetime], Awaitable[int | None]]
+WarmupServiceFactory = Callable[[AsyncSession], Any]
 
 
 def date_window(date_filter: str, now: datetime) -> tuple[datetime, datetime]:
     now = now.astimezone(UTC)
     if date_filter == "today":
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
-        return start, end
+        return start, start + timedelta(days=1)
     if date_filter == "tomorrow":
         tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         return tomorrow, tomorrow + timedelta(days=1)
     if date_filter == "week":
         return now, now + timedelta(days=7)
 
-    days_until_sat = (5 - now.weekday()) % 7
-    saturday = (now + timedelta(days=days_until_sat)).replace(
-        hour=0,
-        minute=0,
-        second=0,
-        microsecond=0,
-    )
-    if saturday < now:
-        saturday += timedelta(days=7)
+    if now.weekday() == 5:
+        saturday = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif now.weekday() == 6:
+        saturday = (now - timedelta(days=1)).replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+    else:
+        days_until_sat = (5 - now.weekday()) % 7
+        saturday = (now + timedelta(days=days_until_sat)).replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
     return saturday, saturday + timedelta(days=2)
 
 
@@ -61,9 +69,11 @@ class FeedAssemblyService:
         session: AsyncSession,
         *,
         remaining_free_swipes: RemainingFreeSwipes,
+        warmup_service_factory: WarmupServiceFactory = MarketWarmupService,
     ) -> None:
         self.session = session
         self.remaining_free_swipes = remaining_free_swipes
+        self.warmup_service_factory = warmup_service_factory
 
     async def get_feed(
         self,
@@ -131,7 +141,7 @@ class FeedAssemblyService:
         warmup_triggered = False
 
         if market_descriptor is not None and not items:
-            market_key, inventory_status, warmup_triggered = await MarketWarmupService(
+            market_key, inventory_status, warmup_triggered = await self.warmup_service_factory(
                 self.session
             ).request_warmup(
                 market_descriptor,

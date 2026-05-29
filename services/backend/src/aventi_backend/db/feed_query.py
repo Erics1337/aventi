@@ -266,8 +266,12 @@ class FeedItemFilter:
         if not bucket:
             return True
         # Use event's local timezone (or UTC if not available)
-        from zoneinfo import ZoneInfo
-        tz = ZoneInfo(venue_tz) if venue_tz else UTC
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            tz = ZoneInfo(venue_tz) if venue_tz else UTC
+        except ZoneInfoNotFoundError:
+            tz = UTC
         try:
             local_dt = (
                 starts_at.astimezone(tz)

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "e2e": "maestro test flows",
+    "e2e": "pnpm run e2e:ios",
     "e2e:ios": "APP_ID=com.aventi.app maestro test flows",
     "e2e:android": "APP_ID=com.crestcode.aventi maestro test flows"
   }

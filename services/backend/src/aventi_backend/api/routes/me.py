@@ -10,10 +10,8 @@ from aventi_backend.models.schemas import (
     ProfileLocationPayload,
     UserPreferences,
 )
-from aventi_backend.services.market_inventory import (
-    MarketWarmupService,
-    build_market_descriptor,
-)
+from aventi_backend.services.market_descriptors import build_market_descriptor
+from aventi_backend.services.market_inventory import MarketWarmupService
 
 router = APIRouter()
 
