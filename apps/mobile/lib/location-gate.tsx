@@ -129,19 +129,38 @@ async function reverseGeocodeLocation(latitude: number, longitude: number): Prom
   }
 }
 
+async function resolveBackendLocation(location: LocationPoint): Promise<LocationPoint> {
+  try {
+    const resolved = await aventiApi.resolveLocation({
+      latitude: location.latitude,
+      longitude: location.longitude,
+    });
+    return {
+      latitude: resolved.latitude,
+      longitude: resolved.longitude,
+      city: resolved.city ?? location.city ?? null,
+      state: resolved.state ?? location.state ?? null,
+      country: resolved.country ?? location.country ?? null,
+      timezone: resolved.timezone ?? location.timezone ?? null,
+    };
+  } catch {
+    return location;
+  }
+}
+
 async function buildLocationPoint(latitude: number, longitude: number): Promise<LocationPoint> {
   const [geocode, timezone] = await Promise.all([
     reverseGeocodeLocation(latitude, longitude),
     Promise.resolve(resolveLocalTimezone()),
   ]);
-  return {
+  return resolveBackendLocation({
     latitude,
     longitude,
     city: geocode.city,
     state: geocode.state,
     country: geocode.country,
     timezone,
-  };
+  });
 }
 
 function formatCoordinateLabel(latitude: number, longitude: number): string {
@@ -157,15 +176,26 @@ async function buildTravelModeOverride(
   const geocodeLabel = [geocode.city, geocode.state].filter(Boolean).join(', ');
   const nextLabel = label?.trim() || geocodeLabel || formatCoordinateLabel(latitude, longitude);
 
-  return {
-    id: `custom:${latitude.toFixed(4)},${longitude.toFixed(4)}`,
-    label: nextLabel,
+  const resolvedLocation = await resolveBackendLocation({
     latitude,
     longitude,
     city: geocode.city,
     state: geocode.state,
     country: geocode.country,
     timezone: null,
+  });
+
+  return {
+    id: `custom:${latitude.toFixed(4)},${longitude.toFixed(4)}`,
+    label: resolvedLocation.city
+      ? [resolvedLocation.city, resolvedLocation.state].filter(Boolean).join(', ')
+      : nextLabel,
+    latitude: resolvedLocation.latitude,
+    longitude: resolvedLocation.longitude,
+    city: resolvedLocation.city,
+    state: resolvedLocation.state,
+    country: resolvedLocation.country,
+    timezone: resolvedLocation.timezone,
   };
 }
 

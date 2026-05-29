@@ -124,3 +124,48 @@ test('keeps public requests available when token lookup fails', async () => {
 
   assert.equal(fetchCalled, true);
 });
+
+test('sends feed market context in the query string', async () => {
+  let requestedUrl: string | null = null;
+  let authorization: string | null = null;
+  mockFetch((input, init) => {
+    requestedUrl = String(input);
+    authorization = new Headers(init?.headers).get('authorization');
+    return jsonResponse({
+      items: [],
+      inventoryStatus: 'no_matches',
+      warmupTriggered: false,
+    });
+  });
+
+  const api = new AventiApiClient({
+    baseUrl: 'https://api.example.test',
+    getAccessToken: () => 'feed-token',
+  });
+
+  await api.getFeed({
+    latitude: 39.7392,
+    longitude: -104.9903,
+    marketCity: 'Denver',
+    marketState: 'CO',
+    marketCountry: 'US',
+    limit: 20,
+    filters: {
+      date: 'week',
+      price: 'any',
+      radiusMiles: 25,
+      vibes: ['solo-friendly'],
+      categories: ['comedy'],
+    },
+  });
+
+  assert.equal(authorization, 'Bearer feed-token');
+  const expectedQuery =
+    'limit=20&date=week&latitude=39.7392&longitude=-104.9903' +
+    '&marketCity=Denver&marketState=CO&marketCountry=US' +
+    '&price=any&radiusMiles=25&vibes=solo-friendly&categories=comedy';
+  assert.equal(
+    requestedUrl,
+    `https://api.example.test/v1/feed?${expectedQuery}`,
+  );
+});
