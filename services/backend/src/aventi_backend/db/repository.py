@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 from typing import Any
-from uuid import NAMESPACE_URL, UUID, uuid5
+from uuid import UUID
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from aventi_backend.core.settings import Settings
-from aventi_backend.db.feed_query import FeedFilterContext, FeedItemFilter, FeedQueryBuilder
+from aventi_backend.db.feed_assembly import FeedAssemblyService
+from aventi_backend.db.user_actions import PreferenceActionService
+from aventi_backend.db.user_identity import canonical_user_uuid
 from aventi_backend.models.schemas import (
     EVENT_VIBE_TAGS,
     FeedImpressionPayload,
@@ -18,61 +19,10 @@ from aventi_backend.models.schemas import (
     SwipePayload,
     UserPreferences,
 )
-from aventi_backend.services.market_inventory import (
-    ELIGIBLE_VERIFICATION_STATUSES,
-    MarketWarmupService,
-    build_market_descriptor,
-)
-from aventi_backend.services.personalization import apply_vibe_update
 
 _SUPPORTED_VIBE_TAGS = EVENT_VIBE_TAGS
-_DEFAULT_RADIUS_MILES = 25.0
-
-
 def _canonical_user_uuid(user_id: str) -> str:
-    try:
-        return str(UUID(user_id))
-    except ValueError:
-        return str(uuid5(NAMESPACE_URL, f"aventi:user:{user_id}"))
-
-
-def _utc_day_bounds(now: datetime) -> tuple[datetime, datetime]:
-    start = now.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    end = start + timedelta(days=1)
-    return start, end
-
-
-def _date_window(date_filter: str, now: datetime) -> tuple[datetime, datetime]:
-    now = now.astimezone(timezone.utc)
-    if date_filter == "today":
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
-        return start, end
-    if date_filter == "tomorrow":
-        tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        return tomorrow, tomorrow + timedelta(days=1)
-    if date_filter == "week":
-        return now, now + timedelta(days=7)
-
-    # weekend: next upcoming Saturday -> Monday (UTC fallback)
-    days_until_sat = (5 - now.weekday()) % 7
-    saturday = (now + timedelta(days=days_until_sat)).replace(hour=0, minute=0, second=0, microsecond=0)
-    if saturday < now:
-        saturday += timedelta(days=7)
-    return saturday, saturday + timedelta(days=2)
-
-
-def _decode_offset_cursor(cursor: str | None) -> int:
-    if not cursor:
-        return 0
-    try:
-        return max(0, int(cursor))
-    except ValueError:
-        return 0
-
-
-def _encode_offset_cursor(offset: int) -> str | None:
-    return str(offset) if offset > 0 else None
+    return canonical_user_uuid(user_id)
 
 
 class AventiRepository:
@@ -227,8 +177,8 @@ class PostgresAventiRepository(AventiRepository):
             {"user_id": db_user_id},
         )
         row = result.mappings().first()
-        categories = list((row["categories"] or [])) if row else []
-        vibes = list((row["vibes"] or [])) if row else []
+        categories = list(row["categories"] or []) if row else []
+        vibes = list(row["vibes"] or []) if row else []
         return {
             "id": user_id,
             "email": (row["email"] if row else None) or email,
@@ -316,38 +266,17 @@ class PostgresAventiRepository(AventiRepository):
         }
 
     async def _is_premium(self, user_id: str) -> bool:
-        db_user_id = _canonical_user_uuid(user_id)
-        result = await self.session.execute(
-            text(
-                "select is_premium from public.premium_entitlements where user_id = :user_id"
-            ),
-            {"user_id": db_user_id},
-        )
-        row = result.first()
-        return bool(row[0]) if row else False
+        return await PreferenceActionService(self.session).is_premium(user_id)
 
     async def _count_swipes_today(self, user_id: str, now: datetime) -> int:
-        db_user_id = _canonical_user_uuid(user_id)
-        start, end = _utc_day_bounds(now)
-        result = await self.session.execute(
-            text(
-                """
-                select count(*)
-                from public.swipe_actions
-                where user_id = :user_id
-                  and created_at >= :start_ts
-                  and created_at < :end_ts
-                """
-            ),
-            {"user_id": db_user_id, "start_ts": start, "end_ts": end},
-        )
-        return int(result.scalar_one())
+        return await PreferenceActionService(self.session).count_swipes_today(user_id, now)
 
     async def _remaining_free_swipes(self, user_id: str, settings: Settings, now: datetime) -> int | None:
-        if await self._is_premium(user_id):
-            return None
-        count = await self._count_swipes_today(user_id, now)
-        return max(0, settings.free_swipe_limit - count)
+        return await PreferenceActionService(self.session).remaining_free_swipes(
+            user_id,
+            settings,
+            now,
+        )
 
     async def get_feed(
         self,
@@ -369,80 +298,30 @@ class PostgresAventiRepository(AventiRepository):
         market_country: str | None,
         force_refresh: bool = False,
     ) -> dict[str, Any]:
-        offset = _decode_offset_cursor(cursor)
-        now = datetime.now(tz=timezone.utc)
         await self.bootstrap_user(user_id, None)
-        start_ts, end_ts = _date_window(date, now)
         db_user_id = _canonical_user_uuid(user_id)
-
-        # Build market descriptor (used for returning marketKey in response).
-        # We no longer compute visible_count here because the cron scheduler
-        # owns warmup decisions; repeat computation was wasted work on every
-        # feed request.
-        market_descriptor = build_market_descriptor(
-            city=market_city,
-            state=market_state,
-            country=market_country,
-            center_latitude=latitude,
-            center_longitude=longitude,
-        )
-
-        # Execute query using builder
-        query_result = await FeedQueryBuilder(
-            session=self.session,
-            user_id=db_user_id,
-            start_ts=start_ts,
-            end_ts=end_ts,
-            eligible_statuses=list(ELIGIBLE_VERIFICATION_STATUSES),
-            seen_window_days=settings.seen_events_window_days,
-        ).with_price_filter(price).execute()
-
-        # Filter and score results
-        filter_context = FeedFilterContext(
-            user_latitude=latitude,
-            user_longitude=longitude,
-            radius_miles=radius_miles,
+        return await FeedAssemblyService(
+            self.session,
+            remaining_free_swipes=self._remaining_free_swipes,
+        ).get_feed(
+            user_id=user_id,
+            db_user_id=db_user_id,
+            settings=settings,
+            date=date,
+            latitude=latitude,
+            longitude=longitude,
+            limit=limit,
             time_of_day=time_of_day,
+            price=price,
+            radius_miles=radius_miles,
             selected_vibes=selected_vibes,
             categories=categories,
-            supported_vibe_tags=_SUPPORTED_VIBE_TAGS,
+            cursor=cursor,
+            market_city=market_city,
+            market_state=market_state,
+            market_country=market_country,
+            force_refresh=force_refresh,
         )
-        scored_items = FeedItemFilter(filter_context).filter_and_score(query_result)
-
-        # Sort, paginate, and extract items
-        scored_items.sort(key=lambda entry: (-entry[0], entry[1]))
-        page_slice = scored_items[offset : offset + limit]
-        items = [item for _, _, item in page_slice]
-        next_cursor = (
-            _encode_offset_cursor(offset + limit) if len(scored_items) > offset + limit else None
-        )
-
-        # Calculate remaining swipes
-        remaining = await self._remaining_free_swipes(user_id, settings, now)
-
-        fallback_status = "none" if items else "insufficient_inventory"
-        market_key: str | None = market_descriptor.key if market_descriptor is not None else None
-        inventory_status = "ready" if items else "no_matches"
-        warmup_triggered = False
-
-        if market_descriptor is not None and not items:
-            market_key, inventory_status, warmup_triggered = await MarketWarmupService(
-                self.session
-            ).request_warmup(
-                market_descriptor,
-                force_refresh=force_refresh,
-            )
-
-        return {
-            "items": items,
-            "nextCursor": next_cursor,
-            "fallbackStatus": fallback_status,
-            "remainingFreeSwipes": remaining,
-            "remainingFreePreferenceActions": remaining,
-            "marketKey": market_key,
-            "inventoryStatus": inventory_status,
-            "warmupTriggered": warmup_triggered,
-        }
 
     async def record_swipe(
         self,
@@ -453,71 +332,11 @@ class PostgresAventiRepository(AventiRepository):
         settings: Settings,
     ) -> dict[str, Any]:
         await self.bootstrap_user(user_id, email)
-        now = datetime.now(tz=timezone.utc)
-        remaining = await self._remaining_free_swipes(user_id, settings, now)
-        if remaining is not None and remaining <= 0:
-            raise PermissionError("Free preference action limit reached")
-
-        db_user_id = _canonical_user_uuid(user_id)
-        event_uuid = str(UUID(payload.event_id))
-
-        await self.session.execute(
-            text(
-                """
-                insert into public.swipe_actions (
-                    user_id, event_id, action, surfaced_at, position, market_key
-                )
-                select :user_id, :event_id, :action, :surfaced_at, :position,
-                       lower(v.city) || '|' || lower(coalesce(v.state, '')) || '|' || lower(coalesce(v.country, 'us'))
-                  from public.events e
-                  join public.venues v on v.id = e.venue_id
-                 where e.id = :event_id
-                """
-            ),
-            {
-                "user_id": db_user_id,
-                "event_id": event_uuid,
-                "action": payload.action,
-                "surfaced_at": payload.surfaced_at,
-                "position": payload.position,
-            },
+        return await PreferenceActionService(self.session).record_swipe(
+            user_id=user_id,
+            payload=payload,
+            settings=settings,
         )
-
-        if payload.vibes:
-            existing_result = await self.session.execute(
-                text(
-                    """
-                    select vibe, weight
-                    from public.user_vibe_weights
-                    where user_id = :user_id
-                      and vibe in :vibes
-                    """
-                ).bindparams(bindparam("vibes", expanding=True)),
-                {"user_id": db_user_id, "vibes": list(payload.vibes)},
-            )
-            existing = {str(row[0]): float(row[1]) for row in existing_result.all()}
-            updated = apply_vibe_update(existing, payload.vibes, payload.action)
-            for vibe, weight in updated.items():
-                await self.session.execute(
-                    text(
-                        """
-                        insert into public.user_vibe_weights (user_id, vibe, weight, updated_at)
-                        values (:user_id, :vibe, :weight, now())
-                        on conflict (user_id, vibe) do update
-                        set weight = excluded.weight,
-                            updated_at = now()
-                        """
-                    ),
-                    {"user_id": db_user_id, "vibe": vibe, "weight": weight},
-                )
-
-        await self.session.commit()
-        remaining_after = await self._remaining_free_swipes(user_id, settings, now)
-        return {
-            "accepted": True,
-            "remainingFreeSwipes": remaining_after,
-            "remainingFreePreferenceActions": remaining_after,
-        }
 
     async def record_feed_impression(
         self,
@@ -527,34 +346,10 @@ class PostgresAventiRepository(AventiRepository):
         payload: FeedImpressionPayload,
     ) -> dict[str, Any]:
         await self.bootstrap_user(user_id, email)
-        db_user_id = _canonical_user_uuid(user_id)
-        event_uuid = str(UUID(payload.event_id))
-        await self.session.execute(
-            text(
-                """
-                insert into public.feed_impressions (
-                  user_id, event_id, served_at, position, affinity_score, filters, market_key
-                )
-                select :user_id, :event_id,
-                       coalesce(:served_at, now()),
-                       :position, :affinity_score, cast(:filters as jsonb),
-                       lower(v.city) || '|' || lower(coalesce(v.state, '')) || '|' || lower(coalesce(v.country, 'us'))
-                  from public.events e
-                  join public.venues v on v.id = e.venue_id
-                 where e.id = :event_id
-                """
-            ),
-            {
-                "user_id": db_user_id,
-                "event_id": event_uuid,
-                "served_at": payload.served_at,
-                "position": payload.position,
-                "affinity_score": payload.affinity_score,
-                "filters": json.dumps(payload.filters or {}),
-            },
+        return await PreferenceActionService(self.session).record_feed_impression(
+            user_id=user_id,
+            payload=payload,
         )
-        await self.session.commit()
-        return {"ok": True}
 
     async def list_favorites(self, user_id: str) -> dict[str, Any]:
         await self.bootstrap_user(user_id, None)
@@ -629,7 +424,7 @@ class PostgresAventiRepository(AventiRepository):
                     "category": row["category"],
                     "venueName": row["venue_name"],
                     "city": row["city"],
-                    "startsAt": starts_at.isoformat() if starts_at else datetime.now(tz=timezone.utc).isoformat(),
+                    "startsAt": starts_at.isoformat() if starts_at else datetime.now(tz=UTC).isoformat(),
                     "endsAt": ends_at.isoformat() if ends_at else None,
                     "bookingUrl": row["booking_url"] or "",
                     "imageUrl": row["image_url"],

@@ -37,6 +37,7 @@ from aventi_backend.services.market_filters import (
 from aventi_backend.services.market_filters import (
     normalize_category as _normalize_category,
 )
+from aventi_backend.services.market_scan_planning import MarketScanPlan, MarketScanPlanner
 from aventi_backend.services.providers import (
     DiscoveryCandidate,
     ProviderConfigurationError,
@@ -65,6 +66,14 @@ SCAN_WINDOWS: tuple[dict[str, Any], ...] = (
 )
 
 _UNSET = object()
+
+
+def _scan_planner() -> MarketScanPlanner:
+    return MarketScanPlanner(
+        discovery_angles=DISCOVERY_ANGLES,
+        page_budget_by_tier=PAGE_BUDGET_BY_TIER,
+        scan_windows=SCAN_WINDOWS,
+    )
 
 
 async def execute_market_scan(
@@ -345,17 +354,7 @@ class MarketWarmupService:
             market,
             last_scan_requested_at=now,
         )
-        short_window = SCAN_WINDOWS[0]
-        tier = market.heat_tier if market.heat_tier in PAGE_BUDGET_BY_TIER else "cold"
-        pages = PAGE_BUDGET_BY_TIER.get(tier, 1)
-        return await self._enqueue_market_scan_job(
-            market,
-            angle=str(short_window["angle"]),
-            source_name=f"admin-short:{market.city.lower()}",
-            source_type="serpapi",
-            source_data={"dateWindow": dict(short_window), "pages": pages},
-            extra_payload={"scanType": "admin", "heatTier": market.heat_tier},
-        )
+        return await self._enqueue_scan_plan(market, _scan_planner().admin_short_scan(market))
 
     async def request_warmup(
         self,
@@ -437,24 +436,14 @@ class MarketWarmupService:
             last_targeted_requested_at=now,
             last_targeted_completed_at=None,
         )
-        await self._enqueue_market_scan_job(
+        await self._enqueue_scan_plan(
             market,
-            angle="targeted discovery",
-            source_name="serpapi-targeted",
-            source_type="serpapi",
-            source_data={
-                "mode": "targeted",
-                "filters": filters,
-                "latitude": latitude,
-                "longitude": longitude,
-                "filterSignature": signature,
-            },
-            extra_payload={
-                "filters": filters,
-                "latitude": latitude,
-                "longitude": longitude,
-                "filterSignature": signature,
-            },
+            _scan_planner().targeted_scan(
+                filters=filters,
+                latitude=latitude,
+                longitude=longitude,
+                filter_signature=signature,
+            ),
         )
         return "targeted_warming", True
 
@@ -536,13 +525,8 @@ class MarketWarmupService:
             visible_count = await self.refresh_market_inventory_state(market)
             discovery_jobs_enqueued = 0
             if force_discovery or visible_count < MARKET_WARM_TARGET:
-                for angle in DISCOVERY_ANGLES:
-                    await self._enqueue_market_scan_job(
-                        market,
-                        angle=angle,
-                        source_name="serpapi",
-                        source_type="serpapi",
-                    )
+                for scan_plan in _scan_planner().warmup_discovery_scans():
+                    await self._enqueue_scan_plan(market, scan_plan)
                     discovery_jobs_enqueued += 1
 
             visible_count = await self.refresh_market_inventory_state(market)
@@ -634,6 +618,21 @@ class MarketWarmupService:
         if extra_payload:
             payload.update(extra_payload)
         return await JobQueueRepository(self.session).enqueue_job(JobType.MARKET_SCAN, payload)
+
+    async def _enqueue_scan_plan(
+        self,
+        market: MarketDescriptor,
+        scan_plan: MarketScanPlan,
+    ) -> JobRecord:
+        return await self._enqueue_market_scan_job(
+            market,
+            angle=scan_plan.angle,
+            source_name=scan_plan.source_name,
+            source_type=scan_plan.source_type,
+            source_url=scan_plan.source_url,
+            source_data=scan_plan.source_data,
+            extra_payload=scan_plan.extra_payload,
+        )
 
     async def _structured_source_rows(self, market_key: str) -> list[dict[str, Any]]:
         result = await self.session.execute(
@@ -853,15 +852,7 @@ class MarketWarmupService:
 
         # Fire a one-shot short-term scan so the first user doesn't see an
         # empty feed for a week. Cold markets will be re-armed via cron only.
-        short_window = SCAN_WINDOWS[0]
-        await self._enqueue_market_scan_job(
-            market,
-            angle=str(short_window["angle"]),
-            source_name=f"bootstrap-short:{market.city.lower()}",
-            source_type="serpapi",
-            source_data={"dateWindow": dict(short_window), "pages": PAGE_BUDGET_BY_TIER["bootstrap"]},
-            extra_payload={"scanType": "bootstrap", "heatTier": "bootstrap"},
-        )
+        await self._enqueue_scan_plan(market, _scan_planner().bootstrap_short_scan(market))
         return True
 
     async def enqueue_weekly_scans(self, *, limit: int = 200) -> dict[str, int]:
@@ -874,23 +865,8 @@ class MarketWarmupService:
         markets = await self.list_active_markets(limit=limit)
         enqueued = 0
         for market in markets:
-            pages = PAGE_BUDGET_BY_TIER.get(market.heat_tier, 1)
-            for window in SCAN_WINDOWS:
-                source_data: dict[str, Any] = {
-                    "dateWindow": dict(window),
-                    "pages": pages,
-                }
-                await self._enqueue_market_scan_job(
-                    market,
-                    angle=str(window["angle"]),
-                    source_name=f"weekly-{window['label']}:{market.city.lower()}",
-                    source_type="serpapi",
-                    source_data=source_data,
-                    extra_payload={
-                        "scanType": window["label"],
-                        "heatTier": market.heat_tier,
-                    },
-                )
+            for scan_plan in _scan_planner().weekly_scans(market):
+                await self._enqueue_scan_plan(market, scan_plan)
                 enqueued += 1
         return {"markets": len(markets), "jobs_enqueued": enqueued}
 
