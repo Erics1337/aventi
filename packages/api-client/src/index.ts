@@ -35,10 +35,12 @@ export interface AventiApiClientOptions {
   getAccessToken?: () => Promise<string | null> | string | null;
 }
 
+type AuthMode = 'required' | 'optional';
 type QueryPrimitive = string | number | boolean | null | undefined;
 type QueryValue = QueryPrimitive | readonly QueryPrimitive[];
 
 type JsonRequestInit = Omit<RequestInit, 'body'> & {
+  auth?: AuthMode;
   body?: unknown;
   query?: Record<string, QueryValue>;
 };
@@ -59,6 +61,15 @@ export class AventiApiError extends Error {
   ) {
     super(message);
   }
+}
+
+function missingAuthTokenError(): AventiApiError {
+  return new AventiApiError(
+    'Authentication required',
+    401,
+    'Unauthorized',
+    { detail: 'Authentication required' },
+  );
 }
 
 export class AventiApiClient {
@@ -108,10 +119,23 @@ export class AventiApiClient {
   }
 
   private async request<T>(path: string, init: JsonRequestInit = {}): Promise<T> {
-    const token = await this.options.getAccessToken?.();
-    const encodedBody = this.encodeBody(init.body);
-    const response = await fetch(this.buildUrl(path, init.query), {
-      ...init,
+    const { auth = 'required', body: rawBody, query, ...requestInit } = init;
+    let token: string | null | undefined;
+    try {
+      token = await this.options.getAccessToken?.();
+    } catch (error) {
+      if (auth === 'required') {
+        throw error;
+      }
+      token = null;
+    }
+    if (auth === 'required' && !token) {
+      throw missingAuthTokenError();
+    }
+
+    const encodedBody = this.encodeBody(rawBody);
+    const response = await fetch(this.buildUrl(path, query), {
+      ...requestInit,
       body: encodedBody?.body,
       headers: {
         ...(encodedBody?.contentType ? { 'Content-Type': encodedBody.contentType } : {}),
@@ -143,7 +167,7 @@ export class AventiApiClient {
   }
 
   getHealth() {
-    return this.request<HealthResponse>(`/v1/health`);
+    return this.request<HealthResponse>(`/v1/health`, { auth: 'optional' });
   }
 
   bootstrapMe() {
@@ -163,6 +187,7 @@ export class AventiApiClient {
 
   resolveLocation(payload: LocationResolvePayload) {
     return this.request<LocationResolveResponse>(`/v1/location/resolve`, {
+      auth: 'optional',
       method: 'POST',
       body: payload,
     });

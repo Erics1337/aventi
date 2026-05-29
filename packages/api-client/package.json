@@ -12,6 +12,6 @@
     "build": "tsc -p tsconfig.json --emitDeclarationOnly",
     "lint": "echo 'No lint configured for @aventi/api-client yet'",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "echo 'No tests for @aventi/api-client yet'"
+    "test": "tsc -p tsconfig.test.json && node --test dist/test/packages/api-client/tests/*.test.js"
   }
 }
