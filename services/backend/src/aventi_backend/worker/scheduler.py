@@ -8,9 +8,12 @@ those jobs via the normal SQS event source mapping.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from typing import Any
 
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from aventi_backend.core.logging import configure_logging
 from aventi_backend.core.settings import get_settings
@@ -22,10 +25,26 @@ logger = structlog.get_logger(__name__)
 # Initialize logging during cold start (same pattern as worker/lambda_handler.py).
 configure_logging(get_settings().log_level)
 
+SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
+WarmupServiceFactory = Callable[[AsyncSession], MarketWarmupService]
 
-async def _run(limit: int) -> dict[str, Any]:
-    async with open_db_session() as session:
-        service = MarketWarmupService(session)
+
+def _parse_limit(event: dict[str, Any]) -> int:
+    limit_raw = event.get("limit")
+    try:
+        return int(limit_raw) if limit_raw is not None else 200
+    except (TypeError, ValueError):
+        return 200
+
+
+async def _run(
+    limit: int,
+    *,
+    session_factory: SessionFactory = open_db_session,
+    warmup_service_factory: WarmupServiceFactory = MarketWarmupService,
+) -> dict[str, Any]:
+    async with session_factory() as session:
+        service = warmup_service_factory(session)
         result = await service.enqueue_weekly_scans(limit=limit)
     logger.info("scheduler.fanout.complete", **result)
     return {**result, "status": "ok"}
@@ -34,10 +53,6 @@ async def _run(limit: int) -> dict[str, Any]:
 def handler(event: dict[str, Any] | None, context: Any) -> dict[str, Any]:
     """Lambda entry point for EventBridge weekly trigger."""
     event = event or {}
-    limit_raw = event.get("limit")
-    try:
-        limit = int(limit_raw) if limit_raw is not None else 200
-    except (TypeError, ValueError):
-        limit = 200
+    limit = _parse_limit(event)
     logger.info("scheduler.invoked", limit=limit)
     return asyncio.run(_run(limit=limit))

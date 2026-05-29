@@ -11,7 +11,7 @@
 2. Mobile sends Supabase bearer token to FastAPI.
 3. FastAPI verifies JWT (JWKS verification scaffolded; dev bypass available for local work).
 4. FastAPI serves feed, swipes, favorites, reports, and entitlements.
-5. Worker polls DB-backed job queue for ingest/verification tasks.
+5. Worker processes SQS-backed ingest/verification tasks through Lambda, with a local polling worker available for LocalStack development.
 
 ## Personalization Split
 - Server: candidate filtering and base ranking
@@ -19,7 +19,7 @@
 - Server: persisted vibe weight updates after swipe submit
 
 ## Deployment Targets
-- API + worker: AWS ECS/Fargate task definitions managed in Terraform
-- Optional ECS service for the API, disabled by default in dev
-- Optional ALB for the API, disabled by default in dev
+- API, worker, and scheduler: AWS Lambda functions built from the backend container image
+- Worker jobs: AWS SQS queue with Lambda event source mapping
+- Scheduler: EventBridge rule invoking the scheduler Lambda
 - Supabase remains hosted externally

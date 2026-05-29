@@ -25,15 +25,16 @@ We use the **Repository Pattern** to interact with the database. This abstracts 
 
 - **`AventiRepository`**: The interface that defines all database interactions (getting feeds, swiping, updating profiles).
 - **`PostgresAventiRepository`**: The actual implementation that executes async SQLAlchemy queries against the Supabase Postgres instance.
-- **`InMemoryAventiRepository`**: A lightweight, in-memory version used as a fallback or for local testing before the database is fully seeded.
+Local development and tests use the same Postgres-backed repository contract as production. Fast unit/contract tests use fakes at module seams; integration tests use local Supabase/Postgres.
 
 ## 3. The Background Job System (`aventi_backend.worker`)
 
 Scraping the web and asking AI models to analyze text takes time. We can't do this while the user is waiting for an HTTP response. Instead, we use an event-driven, serverless background worker stack.
 
-1.  **The Queue (`services/jobs.py`)**: Jobs (like "Scan Austin for events") are pushed to an **AWS SQS Queue** using Boto3. In production, the queue is provisioned by Terraform before the worker starts. In local development with LocalStack, the worker auto-creates the queue on startup if it doesn't exist.
-2.  **The Worker (`worker/lambda_handler.py`)**: An **AWS Lambda Serverless Function** automatically spins up instances to pull new items directly from the SQS queue and execute the business logic.
-3.  **The Handlers (`worker/handlers.py`)**: When the worker claims a job, it routes it to a specific function based on its type:
+1.  **The Queue (`services/jobs.py`)**: Jobs (like "Scan Austin for events") are pushed to an **AWS SQS Queue** using Boto3. In production, the queue is provisioned by Terraform before the worker starts. In local development with LocalStack, the polling worker can auto-create the queue on startup if it doesn't exist.
+2.  **The Worker (`worker/lambda_handler.py`)**: An **AWS Lambda Serverless Function** receives SQS batches and returns `batchItemFailures` so AWS retries only failed messages. Local development can also run `worker/main.py` as a long-polling worker against LocalStack.
+3.  **The Scheduler (`worker/scheduler.py`)**: An EventBridge-triggered Lambda recomputes active market heat and enqueues weekly market scans.
+4.  **The Handlers (`worker/handlers.py`)**: When the worker claims a job, it routes it to a specific function based on its type:
     - `MARKET_SCAN`: Triggers the scraper to search the web for events.
     - `ENRICH_EVENT`: Asks the AI to extract tags, vibes, and dress codes from a long event description.
     - `VERIFY_EVENT`: Checks if a booking URL is still active.
@@ -52,8 +53,8 @@ This is the brain of the event discovery platform, heavily relying on Google's G
 
 1. A user opens the app in "Austin" and hits `GET /v1/feed`.
 2. The `AventiRepository` queries Postgres. It realizes there are zero events for Austin.
-3. The API immediately responds to the user (perhaps showing a loading state or a fallback) AND fires three new `MARKET_SCAN` payloads directly onto the **AWS SQS Queue** for "Austin" (covering angles like "Trending", "Hidden Gems", and "Weekend Vibes").
-4. Instantly, the Serverless **AWS Lambda Worker** is automatically invoked to process these jobs in parallel.
+3. The API immediately responds to the user with inventory status and asks the market warmup service to enqueue SQS work when the market needs discovery.
+4. The Serverless **AWS Lambda Worker** is invoked by SQS to process these jobs in parallel and returns per-record retry failures when needed.
 5. The worker fires up the `SerpApiEventScraper`, which queries the Google Events API, formats the results, and saves the new events to Postgres.
 6. As those events are saved, the worker queues up follow-up jobs: `ENRICH_EVENT` to pull out specific vibes/tags, `GENERATE_IMAGE` to make posters, and `VERIFY_EVENT` to double-check the links.
 7. The next time the user pulls to refresh, their feed is full of rich, verified, AI-generated content.

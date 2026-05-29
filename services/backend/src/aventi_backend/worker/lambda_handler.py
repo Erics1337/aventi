@@ -1,9 +1,13 @@
 import asyncio
 import json
 import uuid
+from collections.abc import Awaitable, Callable
+from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
+from typing import Any
 
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from aventi_backend.core.logging import configure_logging
 from aventi_backend.core.settings import get_settings
@@ -15,6 +19,9 @@ logger = structlog.get_logger(__name__)
 
 # Initialize logging during cold start
 configure_logging(get_settings().log_level)
+
+SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
+JobProcessor = Callable[[JobRecord, AsyncSession], Awaitable[Any]]
 
 
 def handler(event, context) -> dict:
@@ -30,13 +37,18 @@ def handler(event, context) -> dict:
     return asyncio.run(_process_records(records))
 
 
-async def _process_records(records: list[dict]) -> dict:
+async def _process_records(
+    records: list[dict],
+    *,
+    session_factory: SessionFactory = open_db_session,
+    job_processor: JobProcessor = process_job,
+) -> dict:
     processed = 0
     failures = []
 
     for record in records:
         # Each record gets its own session/transaction for isolation
-        async with open_db_session() as session:
+        async with session_factory() as session:
             try:
                 body = record.get("body", "{}")
                 data = json.loads(body)
@@ -65,7 +77,7 @@ async def _process_records(records: list[dict]) -> dict:
                 )
 
                 # Process the job
-                result = await process_job(job, session)
+                result = await job_processor(job, session)
                 logger.info("worker.lambda.success", job_id=job.id, result=result)
                 processed += 1
 
@@ -74,7 +86,11 @@ async def _process_records(records: list[dict]) -> dict:
                 # However, since Lambda integrates with SQS natively,
                 # if you are processing a batch of records, you should return
                 # a 'batchItemFailures' payload so SQS only retries the failed ones.
-                logger.exception("worker.lambda.error", message_id=record.get("messageId"), error=str(exc))
+                logger.exception(
+                    "worker.lambda.error",
+                    message_id=record.get("messageId"),
+                    error=str(exc),
+                )
                 failures.append({"itemIdentifier": record.get("messageId")})
 
     return {

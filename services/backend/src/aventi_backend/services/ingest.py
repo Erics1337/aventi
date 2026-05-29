@@ -1,16 +1,24 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import uuid5, NAMESPACE_URL
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from aventi_backend.services.event_images import infer_image_source, should_generate_main_image
+from aventi_backend.services.event_images import should_generate_main_image
+from aventi_backend.services.event_intake import (
+    attach_image_metadata,
+    booking_domain,
+    coerce_datetime,
+    coerce_float,
+    coerce_list,
+    normalize_category,
+    normalize_event_payload,
+    pick,
+    slugify,
+)
 
 
 @dataclass(slots=True)
@@ -56,7 +64,11 @@ class ManualIngestService:
             raise ValueError("Manual ingest requires at least one event payload")
 
         source = await self._ensure_ingest_source(source_name)
-        ingest_run = await self._create_ingest_run(source_id=source["id"], city=city, discovered_count=len(events))
+        ingest_run = await self._create_ingest_run(
+            source_id=source["id"],
+            city=city,
+            discovered_count=len(events),
+        )
 
         inserted_events = 0
         updated_events = 0
@@ -296,14 +308,7 @@ class ManualIngestService:
 
     @staticmethod
     def _attach_image_metadata(event: dict[str, Any]) -> dict[str, Any]:
-        metadata = dict(event.get("metadata") or {})
-        image_source = infer_image_source(
-            event.get("imageUrl"),
-            str(metadata.get("sourceType")) if metadata.get("sourceType") else None,
-        )
-        if image_source:
-            metadata["imageSource"] = image_source
-        return {**event, "metadata": metadata}
+        return attach_image_metadata(event)
 
     async def _find_fuzzy_duplicate(
         self,
@@ -624,118 +629,12 @@ class ManualIngestService:
             )
 
     def _normalize_event_payload(self, raw: dict[str, Any], *, default_city: str) -> dict[str, Any]:
-        title = self._pick(raw, "title")
-        booking_url = self._pick(raw, "bookingUrl", "booking_url", "url")
-        starts_at_raw = self._pick(raw, "startsAt", "starts_at", default=None)
-        if not title or not booking_url:
-            raise ValueError("Manual ingest event requires `title` and `bookingUrl`")
-        starts_at = self._coerce_datetime(starts_at_raw) if starts_at_raw else datetime.now(tz=UTC) + timedelta(hours=6)
-        ends_at = self._coerce_datetime(self._pick(raw, "endsAt", "ends_at", default=None))
+        return normalize_event_payload(raw, default_city=default_city)
 
-        venue_obj = raw.get("venue") if isinstance(raw.get("venue"), dict) else {}
-        venue_name = self._pick(raw, "venueName", default=None) or self._pick(venue_obj, "name", default=None)
-        if not venue_name:
-            venue_name = f"{default_city} Spotlight"
-
-        city = self._pick(raw, "city", default=None) or self._pick(venue_obj, "city", default=None) or default_city
-        country = self._pick(raw, "country", default=None) or self._pick(venue_obj, "country", default=None) or "US"
-
-        return {
-            "title": str(title),
-            "description": self._pick(raw, "description", default=None),
-            "category": self._normalize_category(self._pick(raw, "category", default="experiences")),
-            "bookingUrl": str(booking_url),
-            "imageUrl": self._pick(raw, "imageUrl", "image_url", default=None),
-            "priceLabel": self._pick(raw, "priceLabel", "price_label", default=None),
-            "isFree": bool(self._pick(raw, "isFree", "is_free", default=False)),
-            "startsAt": starts_at,
-            "endsAt": ends_at,
-            "timezone": self._pick(raw, "timezone", default="UTC"),
-            "venueName": str(venue_name),
-            "venueSlug": self._pick(raw, "venueSlug", default=None) or self._pick(venue_obj, "slug", default=None),
-            "venueAddress": self._pick(raw, "venueAddress", default=None) or self._pick(venue_obj, "address", default=None),
-            "venueLatitude": self._coerce_float(self._pick(raw, "venueLatitude", default=None) or self._pick(venue_obj, "latitude", default=None)),
-            "venueLongitude": self._coerce_float(self._pick(raw, "venueLongitude", default=None) or self._pick(venue_obj, "longitude", default=None)),
-            "city": str(city),
-            "state": self._pick(raw, "state", default=None) or self._pick(venue_obj, "state", default=None),
-            "country": str(country),
-            "dressCode": self._pick(raw, "dressCode", "dress_code", default=None),
-            "crowdAge": self._pick(raw, "crowdAge", "crowd_age", default=None),
-            "musicGenre": self._pick(raw, "musicGenre", "music_genre", default=None),
-            "sourceEventKey": self._pick(raw, "sourceEventKey", "source_event_key", default=None),
-            "vibes": self._coerce_list(self._pick(raw, "vibes", default=[])),
-            "tags": self._coerce_list(self._pick(raw, "tags", default=[])),
-            "metadata": raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {},
-            "venueMetadata": venue_obj.get("metadata") if isinstance(venue_obj.get("metadata"), dict) else {},
-            "venueRating": self._coerce_float(self._pick(raw, "venueRating", "venue_rating", default=None)),
-            "venueReviewCount": self._pick(raw, "venueReviewCount", "venue_review_count", default=None),
-            "ticketOffers": raw.get("ticketOffers") or [],
-            "extraOccurrences": raw.get("extraOccurrences") or [],
-        }
-
-    @staticmethod
-    def _pick(payload: Any, *keys: str, default: Any = None) -> Any:
-        if not isinstance(payload, dict):
-            return default
-        for key in keys:
-            if key in payload and payload[key] is not None:
-                return payload[key]
-        return default
-
-    @staticmethod
-    def _coerce_datetime(value: Any) -> datetime | None:
-        if value is None or value == "":
-            return None
-        if isinstance(value, datetime):
-            return value if value.tzinfo else value.replace(tzinfo=UTC)
-        if isinstance(value, str):
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
-        raise ValueError(f"Unsupported datetime value: {value!r}")
-
-    @staticmethod
-    def _coerce_float(value: Any) -> float | None:
-        if value is None or value == "":
-            return None
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-
-    @staticmethod
-    def _coerce_list(value: Any) -> list[str]:
-        if value is None:
-            return []
-        if isinstance(value, list):
-            return [str(item) for item in value]
-        if isinstance(value, tuple):
-            return [str(item) for item in value]
-        return [str(value)]
-
-    @staticmethod
-    def _slugify(value: str) -> str:
-        slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
-        if slug:
-            return slug[:120]
-        return f"venue-{uuid5(NAMESPACE_URL, value)}"
-
-    @staticmethod
-    def _booking_domain(url: str) -> str | None:
-        match = re.match(r"https?://([^/]+)", url)
-        return match.group(1).lower() if match else None
-
-    @staticmethod
-    def _normalize_category(value: Any) -> str:
-        if value is None:
-            return "experiences"
-        normalized = str(value).strip().lower()
-        if normalized in {"nightlife", "dining", "concerts", "wellness", "experiences"}:
-            return normalized
-        if "music" in normalized or "concert" in normalized or "show" in normalized:
-            return "concerts"
-        if "food" in normalized or "drink" in normalized or "dining" in normalized:
-            return "dining"
-        if "well" in normalized or "fitness" in normalized or "yoga" in normalized:
-            return "wellness"
-        if "night" in normalized or "club" in normalized or "bar" in normalized:
-            return "nightlife"
-        return "experiences"
+    _pick = staticmethod(pick)
+    _coerce_datetime = staticmethod(coerce_datetime)
+    _coerce_float = staticmethod(coerce_float)
+    _coerce_list = staticmethod(coerce_list)
+    _slugify = staticmethod(slugify)
+    _booking_domain = staticmethod(booking_domain)
+    _normalize_category = staticmethod(normalize_category)

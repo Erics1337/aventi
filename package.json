@@ -17,7 +17,8 @@
     "backend:sync": "cd services/backend && uv sync --extra dev",
     "backend:dev": "cd services/backend && uv run python -m aventi_backend.main",
     "backend:worker": "cd services/backend && uv run python -m aventi_backend.worker.main",
-    "backend:test": "cd services/backend && uv run pytest"
+    "backend:test": "cd services/backend && uv run --extra dev pytest -m 'not integration'",
+    "backend:test:integration": "cd services/backend && uv run --extra dev pytest -m integration"
   },
   "devDependencies": {
     "turbo": "^2.0.14"

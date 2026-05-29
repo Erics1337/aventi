@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -12,6 +9,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from aventi_backend.core.settings import get_settings
 from aventi_backend.services.ingest import ManualIngestService
 from aventi_backend.services.jobs import JobQueueRepository, JobRecord, JobType
+from aventi_backend.services.market_descriptors import (
+    MarketDescriptor,
+    build_market_descriptor,
+)
+from aventi_backend.services.market_descriptors import (
+    build_market_key as build_market_key,
+)
+from aventi_backend.services.market_descriptors import (
+    coerce_float as _coerce_float,
+)
+from aventi_backend.services.market_descriptors import (
+    market_from_payload as market_from_payload,
+)
+from aventi_backend.services.market_descriptors import (
+    optional_str as _optional_str,
+)
+from aventi_backend.services.market_filters import (
+    build_targeted_filter_signature,
+)
+from aventi_backend.services.market_filters import (
+    candidate_matches_filters as _candidate_matches_filters,
+)
+from aventi_backend.services.market_filters import (
+    coerce_utc_datetime as _coerce_utc_datetime,
+)
+from aventi_backend.services.market_filters import (
+    normalize_category as _normalize_category,
+)
 from aventi_backend.services.providers import (
     DiscoveryCandidate,
     ProviderConfigurationError,
@@ -40,70 +65,6 @@ SCAN_WINDOWS: tuple[dict[str, Any], ...] = (
 )
 
 _UNSET = object()
-
-
-@dataclass(slots=True)
-class MarketDescriptor:
-    key: str
-    city: str
-    state: str | None
-    country: str
-    center_latitude: float | None = None
-    center_longitude: float | None = None
-    heat_tier: str = "cold"
-
-
-def build_market_key(city: str, state: str | None = None, country: str | None = None) -> str:
-    normalized_city = city.strip().lower()
-    normalized_state = (state or "").strip().lower()
-    normalized_country = (country or "US").strip().lower()
-    return f"{normalized_city}|{normalized_state}|{normalized_country}"
-
-
-def build_market_descriptor(
-    *,
-    city: str | None,
-    state: str | None = None,
-    country: str | None = None,
-    center_latitude: float | None = None,
-    center_longitude: float | None = None,
-) -> MarketDescriptor | None:
-    if not city or not city.strip():
-        return None
-    normalized_city = city.strip()
-    normalized_state = state.strip() if state and state.strip() else None
-    normalized_country = country.strip().upper() if country and country.strip() else "US"
-    return MarketDescriptor(
-        key=build_market_key(normalized_city, normalized_state, normalized_country),
-        city=normalized_city,
-        state=normalized_state,
-        country=normalized_country,
-        center_latitude=center_latitude,
-        center_longitude=center_longitude,
-    )
-
-
-def market_from_payload(payload: dict[str, Any]) -> MarketDescriptor | None:
-    market_key = payload.get("marketKey")
-    market_city = payload.get("marketCity") or payload.get("city")
-    if not isinstance(market_city, str) or not market_city.strip():
-        return None
-    if not isinstance(market_key, str) or not market_key.strip():
-        return build_market_descriptor(
-            city=market_city,
-            state=payload.get("marketState"),
-            country=payload.get("marketCountry"),
-            center_latitude=_coerce_float(payload.get("centerLatitude")),
-            center_longitude=_coerce_float(payload.get("centerLongitude")),
-        )
-    return MarketDescriptor(
-        key=market_key,
-        city=market_city.strip(),
-        state=_optional_str(payload.get("marketState")),
-        country=_optional_str(payload.get("marketCountry")) or "US",
-        center_latitude=_coerce_float(payload.get("centerLatitude")),
-        center_longitude=_coerce_float(payload.get("centerLongitude")),
-    )
 
 
 async def execute_market_scan(
@@ -1160,163 +1121,3 @@ def _build_manual_events(
             }
         )
     return manual_events
-
-
-def _normalize_category(value: str | None) -> str:
-    if not value:
-        return "experiences"
-    normalized = value.strip().lower()
-    if normalized in {"nightlife", "dining", "concerts", "wellness", "experiences"}:
-        return normalized
-    if "music" in normalized or "concert" in normalized or "show" in normalized:
-        return "concerts"
-    if "food" in normalized or "drink" in normalized or "dining" in normalized:
-        return "dining"
-    if "well" in normalized or "fitness" in normalized or "yoga" in normalized:
-        return "wellness"
-    if "night" in normalized or "club" in normalized or "bar" in normalized:
-        return "nightlife"
-    return "experiences"
-
-
-def _optional_str(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        stripped = value.strip()
-        return stripped or None
-    return str(value)
-
-
-def _coerce_float(value: Any) -> float | None:
-    if value is None or value == "":
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def build_targeted_filter_signature(
-    filters: dict[str, Any],
-    *,
-    latitude: float,
-    longitude: float,
-) -> str:
-    payload = {
-        "categories": sorted(str(value) for value in (filters.get("categories") or [])),
-        "date": filters.get("date"),
-        "latitude": round(latitude, 4),
-        "longitude": round(longitude, 4),
-        "price": filters.get("price"),
-        "radiusMiles": filters.get("radiusMiles"),
-        "timeOfDay": filters.get("timeOfDay"),
-        "vibes": sorted(str(value) for value in (filters.get("vibes") or [])),
-    }
-    normalized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-
-
-def _coerce_utc_datetime(value: Any) -> datetime | None:
-    if not isinstance(value, datetime):
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value
-
-
-def _date_window_for_filters(date_filter: str, now: datetime) -> tuple[datetime, datetime]:
-    if date_filter == "today":
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
-        return start, end
-    if date_filter == "tomorrow":
-        tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        return tomorrow, tomorrow + timedelta(days=1)
-    if date_filter == "week":
-        return now, now + timedelta(days=7)
-
-    days_until_sat = (5 - now.weekday()) % 7
-    saturday = (now + timedelta(days=days_until_sat)).replace(hour=0, minute=0, second=0, microsecond=0)
-    if saturday < now:
-        saturday += timedelta(days=7)
-    return saturday, saturday + timedelta(days=2)
-
-
-def _time_of_day_matches(starts_at: datetime, bucket: str | None) -> bool:
-    if not bucket:
-        return True
-    hour = starts_at.astimezone(UTC).hour
-    if bucket == "morning":
-        return 5 <= hour < 12
-    if bucket == "afternoon":
-        return 12 <= hour < 17
-    if bucket == "evening":
-        return 17 <= hour < 22
-    if bucket == "night":
-        return hour >= 22 or hour < 5
-    return True
-
-
-def _haversine_miles(lat1: float, lon1: float, lat2: float | None, lon2: float | None) -> float | None:
-    if lat2 is None or lon2 is None:
-        return None
-    from math import acos, cos, radians, sin
-
-    return 3958.7613 * acos(
-        min(
-            1.0,
-            max(
-                -1.0,
-                cos(radians(lat1)) * cos(radians(lat2)) * cos(radians(lon2) - radians(lon1))
-                + sin(radians(lat1)) * sin(radians(lat2)),
-            ),
-        )
-    )
-
-
-def _candidate_matches_filters(
-    candidate: DiscoveryCandidate,
-    *,
-    feed_filters: dict[str, Any],
-    latitude: float | None,
-    longitude: float | None,
-) -> bool:
-    now = datetime.now(tz=UTC)
-    date_filter = str(feed_filters.get("date") or "week")
-    start_ts, end_ts = _date_window_for_filters(date_filter, now)
-    starts_at = candidate.starts_at
-    if starts_at is None or starts_at < start_ts or starts_at >= end_ts:
-        return False
-
-    if not _time_of_day_matches(starts_at, _optional_str(feed_filters.get("timeOfDay"))):
-        return False
-
-    price = _optional_str(feed_filters.get("price"))
-    if price == "free" and not candidate.is_free:
-        return False
-    if price == "paid" and candidate.is_free:
-        return False
-
-    radius_miles = _coerce_float(feed_filters.get("radiusMiles"))
-    if radius_miles is not None and latitude is not None and longitude is not None:
-        miles = _haversine_miles(latitude, longitude, candidate.venue_latitude, candidate.venue_longitude)
-        if miles is None or miles > radius_miles:
-            return False
-
-    categories = [str(value).strip().lower() for value in (feed_filters.get("categories") or []) if str(value).strip()]
-    candidate_category = _normalize_category(candidate.category)
-    if categories and candidate_category not in categories:
-        return False
-
-    selected_vibes = {
-        str(value).strip().lower()
-        for value in (feed_filters.get("vibes") or [])
-        if str(value).strip()
-    }
-    candidate_vibes = {value.strip().lower() for value in candidate.vibes if value.strip()}
-    candidate_tags = {value.strip().lower() for value in candidate.tags if value.strip()}
-    if selected_vibes and not selected_vibes.intersection(candidate_vibes.union(candidate_tags)):
-        return False
-
-    return True

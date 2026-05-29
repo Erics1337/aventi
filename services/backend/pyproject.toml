@@ -28,7 +28,9 @@ dependencies = [
 dev = [
   "httpx>=0.28.0,<1.0.0",
   "ruff>=0.8.0,<1.0.0",
-  "mypy>=1.13.0,<2.0.0"
+  "mypy>=1.13.0,<2.0.0",
+  "pytest>=8.3.0,<9.0.0",
+  "pytest-asyncio>=0.24.0,<1.0.0"
 ]
 
 [project.scripts]
@@ -49,6 +51,13 @@ select = ["E", "F", "I", "UP", "B"]
 python_version = "3.12"
 strict = false
 warn_unused_configs = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+  "integration: requires local Supabase/Postgres services",
+]
 
 [dependency-groups]
 dev = []

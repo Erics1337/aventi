@@ -75,7 +75,7 @@ Build **Aventi** as a **single Turborepo monorepo** in `/Users/ericswanson/code/
 - `Expo + NativeWind` mobile app
 - `FastAPI` backend (API + worker entrypoints)
 - `Supabase` for Auth + Postgres + Storage
-- `AWS ECS/Fargate` for API/worker deployment
+- `AWS Lambda + SQS + EventBridge` for API, worker, and scheduler deployment
 - Product-first MVP (seeded/manual events first), with scraper/LLM/image systems scaffolded as v1 stubs
 
 This keeps mobile, API, Supabase schema, and shared contracts in sync while preserving deploy/runtime separation. Python is not a reason to split repos.
@@ -118,7 +118,7 @@ Split later only if:
     config.toml
   infra/
     aws/
-      terraform/                    # ECS/ECR/ALB/EventBridge/IAM/Secrets
+      terraform/                    # Lambda/SQS/EventBridge/IAM/Secrets
   docs/
     architecture.md
     api.md
@@ -159,14 +159,13 @@ Split later only if:
 - Supabase Storage
 
 #### Jobs / Scheduling (v1)
-- DB-backed job queue in Supabase Postgres
-- Worker polling with `FOR UPDATE SKIP LOCKED`
-- EventBridge schedules triggering ECS tasks
+- SQS-backed worker queue
+- Lambda worker with SQS partial batch retry responses
+- EventBridge schedules triggering scheduler Lambda fan-out
 
 #### Infra / Deploy (v1)
-- AWS ECR
-- AWS ECS Fargate (API + worker)
-- ALB for API
+- AWS Lambda container image for API, worker, and scheduler
+- AWS SQS for worker jobs
 - CloudWatch Logs
 - EventBridge Scheduler/Rules
 - Secrets Manager or SSM Parameter Store
@@ -338,16 +337,16 @@ Recommended extensions (project support permitting):
 - Premium lock states and CTA stubs
 
 ### Phase 4 — Worker + Ingestion Skeleton
-- DB job queue polling worker
-- Job types: `CITY_SCAN`, `VERIFY_EVENT`, `ENRICH_EVENT`, `GENERATE_IMAGE`
+- SQS job queue with Lambda batch handling
+- Job types: `MARKET_WARMUP`, `MARKET_SCAN`, `VERIFY_EVENT`, `ENRICH_EVENT`, `GENERATE_IMAGE`
 - Manual ingest endpoint/script
 - Verification stub (URL active/inactive)
 - Provider interfaces + mock adapters (scraper/LLM/image)
 
 ### Phase 5 — AWS Deployment
-- Terraform for ECR/ECS/ALB/IAM/CloudWatch/EventBridge/Secrets
-- Dockerfiles for backend API and worker
-- ECS task/service definitions
+- Terraform for Lambda/SQS/IAM/CloudWatch/EventBridge/Secrets
+- Backend Lambda container image
+- Lambda function definitions for API, worker, and scheduler
 - EventBridge schedules
 - CI pipeline for test/build/push/deploy
 
@@ -392,8 +391,8 @@ Recommended extensions (project support permitting):
 - Dedupe excludes recent rejects (normalized title matching in v1)
 
 ### Worker Tests
-- Worker claims jobs without double-processing
-- Retries and error recording work
+- Worker handles SQS batches and returns `batchItemFailures`
+- Malformed jobs retry independently from successful messages
 - Verification stub updates event status
 - Manual ingest normalizes and dedupes records
 
@@ -410,11 +409,11 @@ Recommended extensions (project support permitting):
 - Returning user sees favorites and personalized feed changes
 - 3 unique reports hide invalid event
 - Worker verification marks stale event hidden
-- API and worker deploy to ECS and connect to Supabase
+- API, worker, and scheduler deploy to Lambda and connect to Supabase
 
 ## Assumptions and Defaults (Explicit)
 - Turborepo monorepo is the v1 repo strategy.
-- AWS deployment is required now (`ECS/Fargate`), with Supabase hosted separately.
+- AWS deployment is Lambda/SQS/EventBridge, with Supabase hosted separately.
 - Supabase is source of truth for auth + DB + storage.
 - Mobile is Expo + NativeWind.
 - Product MVP is prioritized over full scraper/Stripe implementations.

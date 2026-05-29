@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -17,22 +19,75 @@ from aventi_backend.services.market_inventory import (
 )
 from aventi_backend.services.verification import VerificationService
 
+MarketScanExecutor = Callable[..., Awaitable[dict[str, Any]]]
+WarmupServiceFactory = Callable[[AsyncSession], MarketWarmupService]
+VerificationServiceFactory = Callable[[AsyncSession], VerificationService]
+SettingsFactory = Callable[[], Any]
+EventEnricherFactory = Callable[[], Any]
+ImageGeneratorFactory = Callable[[Any], Any]
+StorageFactory = Callable[[], Any]
 
-async def process_job(job: JobRecord, session: AsyncSession) -> dict[str, Any] | None:
+
+def _default_event_enricher() -> GeminiEventScraper:
+    return GeminiEventScraper(source_name="enrichment-job")
+
+
+def _default_image_generator(settings: Any) -> Any:
+    from aventi_backend.services.gemini import PollinationsImageGenerator
+
+    return PollinationsImageGenerator(api_key=settings.pollinations_api_key)
+
+
+def _default_storage() -> Any:
+    from aventi_backend.services.storage import SupabaseStorageService
+
+    return SupabaseStorageService()
+
+
+@dataclass(frozen=True, slots=True)
+class JobDependencies:
+    market_scan_executor: MarketScanExecutor = execute_market_scan
+    warmup_service_factory: WarmupServiceFactory = MarketWarmupService
+    verification_service_factory: VerificationServiceFactory = VerificationService
+    event_enricher_factory: EventEnricherFactory = _default_event_enricher
+    settings_factory: SettingsFactory | None = None
+    image_generator_factory: ImageGeneratorFactory = _default_image_generator
+    storage_factory: StorageFactory = _default_storage
+
+    def settings(self) -> Any:
+        if self.settings_factory is not None:
+            return self.settings_factory()
+        from aventi_backend.core.settings import get_settings
+
+        return get_settings()
+
+
+async def process_job(
+    job: JobRecord,
+    session: AsyncSession,
+    *,
+    dependencies: JobDependencies | None = None,
+) -> dict[str, Any] | None:
+    dependencies = dependencies or JobDependencies()
     if job.type == JobType.MARKET_WARMUP:
-        return await _handle_market_warmup(job, session)
+        return await _handle_market_warmup(job, session, dependencies=dependencies)
     if job.type == JobType.MARKET_SCAN:
-        return await _handle_market_scan(job, session)
+        return await _handle_market_scan(job, session, dependencies=dependencies)
     if job.type == JobType.VERIFY_EVENT:
-        return await _handle_verify_event(job, session)
+        return await _handle_verify_event(job, session, dependencies=dependencies)
     if job.type == JobType.ENRICH_EVENT:
-        return await _handle_enrich_event(job, session)
+        return await _handle_enrich_event(job, session, dependencies=dependencies)
     if job.type == JobType.GENERATE_IMAGE:
-        return await _handle_generate_image(job, session)
+        return await _handle_generate_image(job, session, dependencies=dependencies)
     raise ValueError(f"Unsupported job type: {job.type}")
 
 
-async def _handle_generate_image(job: JobRecord, session: AsyncSession) -> dict[str, Any]:
+async def _handle_generate_image(
+    job: JobRecord,
+    session: AsyncSession,
+    *,
+    dependencies: JobDependencies,
+) -> dict[str, Any]:
     payload = job.payload or {}
     event_id = payload.get("eventId")
     if not isinstance(event_id, str):
@@ -67,13 +122,9 @@ async def _handle_generate_image(job: JobRecord, session: AsyncSession) -> dict[
     if not event_row:
         return {"skipped": True, "reason": "event-not-found", "eventId": event_id}
 
-    from aventi_backend.services.gemini import PollinationsImageGenerator
-    from aventi_backend.services.storage import SupabaseStorageService
-    from aventi_backend.core.settings import get_settings
+    settings = dependencies.settings()
 
-    settings = get_settings()
-
-    generator = PollinationsImageGenerator(api_key=settings.pollinations_api_key)
+    generator = dependencies.image_generator_factory(settings)
     vibes = [str(vibe) for vibe in (event_row.get("vibes") or []) if str(vibe).strip()]
     prompt = (
         f"A cinematic promotional event poster for {event_row.get('title')} "
@@ -83,7 +134,7 @@ async def _handle_generate_image(job: JobRecord, session: AsyncSession) -> dict[
     )
     pollinations_url = await generator.generate_event_image(prompt)
 
-    storage = SupabaseStorageService()
+    storage = dependencies.storage_factory()
     await storage.ensure_bucket_exists()
     storage_url = await storage.upload_image_from_url(
         pollinations_url, event_id, api_key=generator.api_key
@@ -118,7 +169,12 @@ async def _handle_generate_image(job: JobRecord, session: AsyncSession) -> dict[
         "source": "supabase_storage",
     }
 
-async def _handle_enrich_event(job: JobRecord, session: AsyncSession) -> dict[str, Any]:
+async def _handle_enrich_event(
+    job: JobRecord,
+    session: AsyncSession,
+    *,
+    dependencies: JobDependencies,
+) -> dict[str, Any]:
     payload = job.payload or {}
     event_id = payload.get("eventId")
     if not isinstance(event_id, str):
@@ -126,8 +182,14 @@ async def _handle_enrich_event(job: JobRecord, session: AsyncSession) -> dict[st
 
     # Fetch event details
     result = await session.execute(
-        text("SELECT id, title, description, category, vibes, tags, metadata, city FROM events WHERE id = :id"),
-        {"id": event_id}
+        text(
+            """
+            SELECT id, title, description, category, vibes, tags, metadata, city
+            FROM events
+            WHERE id = :id
+            """
+        ),
+        {"id": event_id},
     )
     event_row = result.mappings().first()
     if not event_row:
@@ -140,7 +202,7 @@ async def _handle_enrich_event(job: JobRecord, session: AsyncSession) -> dict[st
     context = f"{event_row.get('title', '')} in {event_row.get('city', '')}"
 
     # Run enrichment
-    enricher = GeminiEventScraper(source_name="enrichment-job")
+    enricher = dependencies.event_enricher_factory()
     metadata_updates = await enricher.enrich_event(description=description, context=context)
 
     if not metadata_updates:
@@ -196,9 +258,16 @@ async def _handle_enrich_event(job: JobRecord, session: AsyncSession) -> dict[st
     }
 
 
-async def _handle_market_scan(job: JobRecord, session: AsyncSession) -> dict[str, Any]:
+async def _handle_market_scan(
+    job: JobRecord,
+    session: AsyncSession,
+    *,
+    dependencies: JobDependencies,
+) -> dict[str, Any]:
     payload = job.payload or {}
-    market = market_from_payload(payload) or build_market_descriptor(city=str(payload.get("city") or "Austin"))
+    market = market_from_payload(payload) or build_market_descriptor(
+        city=str(payload.get("city") or "Austin"),
+    )
     if market is None:
         raise ValueError("MARKET_SCAN job payload requires market or city context")
     # Propagate heat_tier hint (supplied by scheduler) so execute_market_scan can
@@ -216,7 +285,7 @@ async def _handle_market_scan(job: JobRecord, session: AsyncSession) -> dict[str
         extra_meta["scanType"] = scan_type
     try:
         filter_payload = payload.get("filters")
-        market_scan_result = await execute_market_scan(
+        market_scan_result = await dependencies.market_scan_executor(
             session,
             market=market,
             angle=angle,
@@ -231,19 +300,29 @@ async def _handle_market_scan(job: JobRecord, session: AsyncSession) -> dict[str
             extra_meta=extra_meta or None,
         )
         if isinstance(filter_signature, str) and filter_signature.strip():
-            await MarketWarmupService(session).mark_targeted_mining_completed(
+            await dependencies.warmup_service_factory(session).mark_targeted_mining_completed(
                 market,
                 filter_signature=filter_signature,
             )
     except Exception:
         if isinstance(filter_signature, str) and filter_signature.strip():
-            await MarketWarmupService(session).mark_targeted_mining_completed(
+            await dependencies.warmup_service_factory(session).mark_targeted_mining_completed(
                 market,
                 filter_signature=filter_signature,
             )
-        await MarketWarmupService(session)._mark_scan_completed(market, success=False, error=f"market_scan failed for angle={angle}")
+        await dependencies.warmup_service_factory(session)._mark_scan_completed(
+            market,
+            success=False,
+            error=f"market_scan failed for angle={angle}",
+        )
         await session.execute(
-            text("update public.market_inventory_state set scan_lock_until = null where market_key = :key"),
+            text(
+                """
+                update public.market_inventory_state
+                set scan_lock_until = null
+                where market_key = :key
+                """
+            ),
             {"key": market.key},
         )
         await session.commit()
@@ -260,12 +339,17 @@ def _parse_bool(value: Any) -> bool:
     return False
 
 
-async def _handle_market_warmup(job: JobRecord, session: AsyncSession) -> dict[str, Any]:
+async def _handle_market_warmup(
+    job: JobRecord,
+    session: AsyncSession,
+    *,
+    dependencies: JobDependencies,
+) -> dict[str, Any]:
     payload = job.payload or {}
     market = market_from_payload(payload)
     if market is None:
         raise ValueError("MARKET_WARMUP job payload requires `marketCity` or `city`")
-    result = await MarketWarmupService(session).run_market_warmup(
+    result = await dependencies.warmup_service_factory(session).run_market_warmup(
         market,
         job_id=job.id,
         force_discovery=_parse_bool(payload.get("forceDiscovery")),
@@ -273,10 +357,15 @@ async def _handle_market_warmup(job: JobRecord, session: AsyncSession) -> dict[s
     return {"jobId": job.id, "jobType": str(job.type), **result}
 
 
-async def _handle_verify_event(job: JobRecord, session: AsyncSession) -> dict[str, Any]:
+async def _handle_verify_event(
+    job: JobRecord,
+    session: AsyncSession,
+    *,
+    dependencies: JobDependencies,
+) -> dict[str, Any]:
     payload = job.payload or {}
     event_id = payload.get("eventId")
     if not isinstance(event_id, str):
         raise ValueError("VERIFY_EVENT job payload requires string `eventId`")
-    result = await VerificationService(session).verify_event(event_id)
+    result = await dependencies.verification_service_factory(session).verify_event(event_id)
     return {"jobId": job.id, "jobType": str(job.type), **result}
