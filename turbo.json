@@ -22,6 +22,10 @@
     "test": {
       "dependsOn": ["^test"],
       "outputs": ["coverage/**"]
+    },
+    "e2e": {
+      "cache": false,
+      "persistent": false
     }
   }
 }

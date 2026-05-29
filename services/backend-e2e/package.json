@@ -1,0 +1,9 @@
+{
+  "name": "@aventi/backend-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "e2e": "node tests/health.mjs",
+    "test": "pnpm e2e"
+  }
+}

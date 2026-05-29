@@ -44,6 +44,8 @@ dist/
 build/
 coverage/
 .next/
+playwright-report/
+test-results/
 
 # Terraform
 .terraform/
