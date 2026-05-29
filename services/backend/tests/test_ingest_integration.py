@@ -8,6 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from aventi_backend.services.ingest import ManualIngestService
+from aventi_backend.services.jobs import JobRecord, JobType
 
 pytestmark = pytest.mark.integration
 
@@ -35,6 +36,7 @@ async def _cleanup_ingest(session: AsyncSession, source_name: str, booking_prefi
 
 async def test_manual_ingest_persists_bundle_and_dedupes_booking_url(
     db_session: AsyncSession,
+    fake_job_queue: list[JobRecord],
 ) -> None:
     suffix = uuid4().hex
     source_name = f"integration:ingest:{suffix}"
@@ -134,13 +136,18 @@ async def test_manual_ingest_persists_bundle_and_dedupes_booking_url(
         assert counts["occurrences"] == 2
         assert counts["tags"] >= 2
         assert counts["ticket_offers"] == 1
-        assert counts["image_jobs_enqueued"] == "0"
+        assert counts["image_jobs_enqueued"] == "1"
+        assert [job.type for job in fake_job_queue] == [
+            JobType.GENERATE_IMAGE,
+            JobType.GENERATE_IMAGE,
+        ]
     finally:
         await _cleanup_ingest(db_session, source_name, f"https://tickets.example/{suffix}")
 
 
 async def test_manual_ingest_merges_fuzzy_duplicate_same_venue_and_day(
     db_session: AsyncSession,
+    fake_job_queue: list[JobRecord],
 ) -> None:
     suffix = uuid4().hex
     source_name = f"integration:fuzzy:{suffix}"
@@ -178,5 +185,6 @@ async def test_manual_ingest_merges_fuzzy_duplicate_same_venue_and_day(
 
         assert summary.inserted_events == 1
         assert run_metadata["nearDuplicatesSkipped"] == 1
+        assert [job.type for job in fake_job_queue] == [JobType.GENERATE_IMAGE]
     finally:
         await _cleanup_ingest(db_session, source_name, booking_prefix)

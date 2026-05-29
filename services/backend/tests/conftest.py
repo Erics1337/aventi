@@ -2,13 +2,42 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from aventi_backend.services.jobs import JobQueueRepository, JobRecord, JobType
+
 TEST_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@127.0.0.1:54332/postgres"
+
+
+@pytest.fixture
+def fake_job_queue(monkeypatch: pytest.MonkeyPatch) -> list[JobRecord]:
+    jobs: list[JobRecord] = []
+
+    async def enqueue_job(
+        self: JobQueueRepository,
+        job_type: JobType,
+        payload: dict | None = None,
+        *,
+        run_at: datetime | None = None,
+        max_attempts: int = 5,
+    ) -> JobRecord:
+        job = JobRecord(
+            id=f"fake-job-{len(jobs) + 1}",
+            type=job_type,
+            payload=payload or {},
+            run_at=run_at or datetime.now(tz=UTC),
+            max_attempts=max_attempts,
+        )
+        jobs.append(job)
+        return job
+
+    monkeypatch.setattr(JobQueueRepository, "enqueue_job", enqueue_job)
+    return jobs
 
 
 @pytest.fixture

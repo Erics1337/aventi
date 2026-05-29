@@ -11,6 +11,7 @@ from aventi_backend.core.settings import Settings
 from aventi_backend.db.repository import PostgresAventiRepository
 from aventi_backend.models.schemas import SwipePayload
 from aventi_backend.services.ingest import ManualIngestService
+from aventi_backend.services.jobs import JobRecord
 from aventi_backend.services.market_inventory import MarketDescriptor, MarketWarmupService
 
 pytestmark = pytest.mark.integration
@@ -48,6 +49,7 @@ async def _cleanup_feed(
 
 async def test_feed_repository_filters_saved_seen_items_and_updates_swipe_weights(
     db_session: AsyncSession,
+    fake_job_queue: list[JobRecord],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     suffix = uuid4().hex
@@ -178,6 +180,6 @@ async def test_feed_repository_filters_saved_seen_items_and_updates_swipe_weight
             details="integration coverage",
         )
         entitlements = await repository.get_entitlements(user_id, None)
-        assert entitlements.unlimitedSwipes is False
+        assert entitlements.unlimited_swipes is False
     finally:
         await _cleanup_feed(db_session, source_name, booking_prefix, user_id)
