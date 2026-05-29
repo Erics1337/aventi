@@ -12,7 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from aventi_backend.core.settings import get_settings
 from aventi_backend.services.ingest import ManualIngestService
 from aventi_backend.services.jobs import JobQueueRepository, JobRecord, JobType
-from aventi_backend.services.providers import DiscoveryCandidate, build_market_scan_scraper
+from aventi_backend.services.providers import (
+    DiscoveryCandidate,
+    ProviderConfigurationError,
+    build_market_scan_scraper,
+    provider_config_from_settings,
+)
 from aventi_backend.services.verification import VerificationService
 
 MARKET_ACTIVE_WINDOW = timedelta(days=7)
@@ -127,10 +132,46 @@ async def execute_market_scan(
     if source_data is not None:
         payload["sourceData"] = source_data
 
-    scraper = build_market_scan_scraper(payload)
-    candidates = await scraper.discover(city=market.city, angle=angle)
+    settings = get_settings()
+    scraper = build_market_scan_scraper(
+        payload,
+        provider_config=provider_config_from_settings(settings),
+    )
     # Scrapers that instrument themselves (SerpApiEventScraper) stash pagination
     # + timing stats on last_meta; others leave it empty.
+    try:
+        candidates = await scraper.discover(city=market.city, angle=angle)
+    except ProviderConfigurationError as exc:
+        scan_meta = {
+            "angle": angle,
+            "jobId": job_id,
+            "marketKey": market.key,
+            "heatTier": market.heat_tier,
+            "providerError": str(exc),
+        }
+        if extra_meta:
+            scan_meta.update(extra_meta)
+        await MarketWarmupService(session).refresh_market_inventory_state(market)
+        return {
+            "source": source_name,
+            "city": market.city,
+            "skipped": True,
+            "reason": "provider_configuration",
+            "ingest": {
+                "ok": True,
+                "sourceId": None,
+                "ingestRunId": None,
+                "source": source_name,
+                "city": market.city,
+                "discovered": 0,
+                "insertedEvents": 0,
+                "updatedEvents": 0,
+                "insertedOccurrences": 0,
+                "eventIds": [],
+            },
+            "scanMeta": scan_meta,
+            "verificationJobsEnqueued": 0,
+        }
     scraper_meta: dict[str, Any] = dict(getattr(scraper, "last_meta", {}) or {})
     if feed_filters:
         candidates = [
@@ -194,7 +235,6 @@ async def execute_market_scan(
         scan_meta=scan_meta,
     )
 
-    settings = get_settings()
     verification_enqueued = 0
     if settings.enable_verification and ingest_summary.event_ids:
         verification_enqueued = await VerificationService(session).enqueue_verification_jobs(

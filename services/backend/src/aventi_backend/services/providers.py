@@ -10,6 +10,21 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+_UNSET = object()
+
+
+class ProviderConfigurationError(RuntimeError):
+    """Raised when a provider is selected but required configuration is absent."""
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderConfig:
+    serpapi_api_key: str | None = None
+
+
+def provider_config_from_settings(settings: Any) -> ProviderConfig:
+    return ProviderConfig(serpapi_api_key=getattr(settings, "serpapi_api_key", None))
+
 
 @dataclass(slots=True)
 class TicketOffer:
@@ -182,21 +197,25 @@ class SerpApiEventScraper:
         *,
         source_name: str | None = None,
         source_data: Any = None,
+        api_key: str | None | object = _UNSET,
         timeout_seconds: float = 20.0,
     ) -> None:
         self.source_name = source_name or "serpapi"
         self.source_data = source_data
+        if api_key is _UNSET:
+            from aventi_backend.core.settings import get_settings
+
+            api_key = get_settings().serpapi_api_key
+        self.api_key = api_key if isinstance(api_key, str) and api_key.strip() else None
         self.timeout_seconds = timeout_seconds
         # Populated by discover(); read by execute_market_scan to forward into ingest_runs.metadata.
         self.last_meta: dict[str, Any] = {}
 
     async def discover(self, city: str, angle: str) -> list[DiscoveryCandidate]:
-        from aventi_backend.core.settings import get_settings
         import time as _time
 
-        api_key = get_settings().serpapi_api_key
-        if not api_key:
-            raise ValueError("SERPAPI_API_KEY is not configured")
+        if not self.api_key:
+            raise ProviderConfigurationError("SERPAPI_API_KEY is not configured")
 
         # Parse optional dateWindow + pages hints from source_data. Both are
         # supplied by the cron scheduler; manual callers get the default
@@ -219,7 +238,7 @@ class SerpApiEventScraper:
         base_params = {
             "engine": "google_events",
             "q": query,
-            "api_key": api_key,
+            "api_key": self.api_key,
             "num": "10",
         }
         # Server-side date filter (htichips). Best-effort; client-side filter below
@@ -467,7 +486,11 @@ def _filter_by_date_window(
     return filtered
 
 
-def build_market_scan_scraper(payload: dict[str, Any]) -> SearchGroundedScraper:
+def build_market_scan_scraper(
+    payload: dict[str, Any],
+    *,
+    provider_config: ProviderConfig | None = None,
+) -> SearchGroundedScraper:
     source_type = str(payload.get("sourceType") or "mock").strip().lower()
     source_name = str(payload.get("sourceName") or source_type or "market-scan")
     source_url = payload.get("sourceUrl")
@@ -489,7 +512,11 @@ def build_market_scan_scraper(payload: dict[str, Any]) -> SearchGroundedScraper:
         from aventi_backend.services.gemini import GeminiEventScraper
         return GeminiEventScraper(source_name=source_name)
     if source_type in {"serpapi", "google-events"}:
-        return SerpApiEventScraper(source_name=source_name, source_data=source_data)
+        return SerpApiEventScraper(
+            source_name=source_name,
+            source_data=source_data,
+            api_key=provider_config.serpapi_api_key if provider_config else _UNSET,
+        )
     return MockScraper()
 
 
