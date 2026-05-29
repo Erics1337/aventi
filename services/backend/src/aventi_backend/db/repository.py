@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from aventi_backend.core.settings import get_settings
+from aventi_backend.core.settings import Settings
+from aventi_backend.db.feed_query import FeedFilterContext, FeedItemFilter, FeedQueryBuilder
 from aventi_backend.models.schemas import (
+    EVENT_VIBE_TAGS,
     FeedImpressionPayload,
     MembershipEntitlements,
     ProfileLocationPayload,
@@ -17,24 +19,13 @@ from aventi_backend.models.schemas import (
     UserPreferences,
 )
 from aventi_backend.services.market_inventory import (
-    build_market_descriptor,
     ELIGIBLE_VERIFICATION_STATUSES,
     MarketWarmupService,
+    build_market_descriptor,
 )
 from aventi_backend.services.personalization import apply_vibe_update
-from aventi_backend.db.feed_query import FeedQueryBuilder, FeedItemFilter, FeedFilterContext
 
-_SUPPORTED_VIBE_TAGS = {
-    "chill",
-    "energetic",
-    "intellectual",
-    "romantic",
-    "social",
-    "luxury",
-    "live-music",
-    "wellness",
-    "late-night",
-}
+_SUPPORTED_VIBE_TAGS = EVENT_VIBE_TAGS
 _DEFAULT_RADIUS_MILES = 25.0
 
 

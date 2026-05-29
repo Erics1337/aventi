@@ -5,7 +5,53 @@ from pydantic import BaseModel, Field
 
 SwipeAction = Literal["like", "pass"]
 ReportReason = Literal["invalid", "cancelled", "duplicate", "unsafe", "other"]
-EventCategory = Literal["nightlife", "dining", "concerts", "wellness", "experiences"]
+FeedFallbackStatus = Literal[
+    "none",
+    "relaxed_filters",
+    "insufficient_inventory",
+    "no_filter_matches",
+]
+FeedInventoryStatus = Literal["ready", "warming", "targeted_warming", "no_matches"]
+EVENT_CATEGORIES = {
+    "nightlife",
+    "dining",
+    "concerts",
+    "wellness",
+    "experiences",
+    "comedy",
+    "sports",
+    "outdoors",
+    "markets",
+    "tech",
+}
+EventCategory = Literal[
+    "nightlife",
+    "dining",
+    "concerts",
+    "wellness",
+    "experiences",
+    "comedy",
+    "sports",
+    "outdoors",
+    "markets",
+    "tech",
+]
+EVENT_VIBE_TAGS = {
+    "chill",
+    "energetic",
+    "intellectual",
+    "romantic",
+    "social",
+    "luxury",
+    "live-music",
+    "wellness",
+    "late-night",
+    "solo-friendly",
+    "family",
+    "adventurous",
+    "intimate",
+    "underground",
+}
 EventVibeTag = Literal[
     "chill",
     "energetic",
@@ -16,6 +62,11 @@ EventVibeTag = Literal[
     "live-music",
     "wellness",
     "late-night",
+    "solo-friendly",
+    "family",
+    "adventurous",
+    "intimate",
+    "underground",
 ]
 
 
@@ -79,15 +130,13 @@ class FeedRequest(BaseModel):
 class FeedResponse(BaseModel):
     items: list[EventCard]
     next_cursor: str | None = Field(default=None, alias="nextCursor")
-    fallback_status: Literal["none", "relaxed_filters", "insufficient_inventory", "no_filter_matches"] | None = Field(
-        default=None, alias="fallbackStatus"
-    )
+    fallback_status: FeedFallbackStatus | None = Field(default=None, alias="fallbackStatus")
     remaining_free_swipes: int | None = Field(default=None, alias="remainingFreeSwipes")
     remaining_free_preference_actions: int | None = Field(
         default=None, alias="remainingFreePreferenceActions"
     )
     market_key: str | None = Field(default=None, alias="marketKey")
-    inventory_status: Literal["ready", "warming", "targeted_warming", "no_matches"] = Field(alias="inventoryStatus")
+    inventory_status: FeedInventoryStatus = Field(alias="inventoryStatus")
     warmup_triggered: bool = Field(default=False, alias="warmupTriggered")
 
 
@@ -121,6 +170,15 @@ class ProfileLocationPayload(BaseModel):
     state: str | None = None
     country: str | None = None
     timezone: str | None = None
+
+
+class LocationResolvePayload(BaseModel):
+    latitude: float
+    longitude: float
+
+
+class LocationResolveResponse(ProfileLocationPayload):
+    formatted_address: str | None = Field(default=None, alias="formattedAddress")
 
 
 class MarketSeenPayload(BaseModel):

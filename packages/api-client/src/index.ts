@@ -1,17 +1,32 @@
 import type {
   AdminDashboardResponse,
+  AdminEnqueueMarketScanPayload,
   AdminEnqueueMarketScanResponse,
   AdminImportMarketsCatalogResponse,
   AdminUserLocationsResponse,
+  BootstrapMeResponse,
+  DeleteFavoriteResponse,
+  EventReportPayload,
+  EventReportResponse,
   FeedImpressionPayload,
+  FeedImpressionResponse,
   FeedRequest,
   FeedResponse,
   FavoritesResponse,
-  MeProfile,
+  GetMeResponse,
+  HealthResponse,
+  LocationResolvePayload,
+  LocationResolveResponse,
+  MarketSeenPayload,
+  MarketSeenResponse,
   MembershipEntitlements,
   ProfileLocationPayload,
-  ReportReason,
+  ResetSeenEventsResponse,
+  SaveFavoriteResponse,
   SwipePayload,
+  SwipeResponse,
+  UpdateMyLocationResponse,
+  UpdatePreferencesResponse,
   UserPreferences,
 } from '@aventi/contracts';
 
@@ -20,135 +35,198 @@ export interface AventiApiClientOptions {
   getAccessToken?: () => Promise<string | null> | string | null;
 }
 
+type QueryPrimitive = string | number | boolean | null | undefined;
+type QueryValue = QueryPrimitive | readonly QueryPrimitive[];
+
+type JsonRequestInit = Omit<RequestInit, 'body'> & {
+  body?: unknown;
+  query?: Record<string, QueryValue>;
+};
+
+type EncodedBody = {
+  body: BodyInit;
+  contentType?: string;
+};
+
+export class AventiApiError extends Error {
+  readonly name = 'AventiApiError';
+
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly statusText: string,
+    readonly body: unknown,
+  ) {
+    super(message);
+  }
+}
+
 export class AventiApiClient {
   constructor(private readonly options: AventiApiClientOptions) {}
 
-  private async request<T>(path: string, init?: RequestInit): Promise<T> {
+  private buildUrl(path: string, query?: Record<string, QueryValue>): string {
+    const baseUrl = this.options.baseUrl.replace(/\/+$/, '');
+    const url = new URL(`${baseUrl}${path.startsWith('/') ? path : `/${path}`}`);
+
+    if (query) {
+      for (const [key, value] of Object.entries(query)) {
+        const values = Array.isArray(value) ? value : [value];
+        for (const item of values) {
+          if (item === null || item === undefined || item === '') continue;
+          url.searchParams.append(key, String(item));
+        }
+      }
+    }
+
+    return url.toString();
+  }
+
+  private encodeBody(body: unknown): EncodedBody | undefined {
+    if (body === undefined) return undefined;
+    const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+    const isUrlSearchParams =
+      typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams;
+    const isBlob = typeof Blob !== 'undefined' && body instanceof Blob;
+    if (typeof body === 'string' || isFormData || isBlob) {
+      return { body };
+    }
+    if (isUrlSearchParams) {
+      return { body, contentType: 'application/x-www-form-urlencoded;charset=UTF-8' };
+    }
+    return { body: JSON.stringify(body), contentType: 'application/json' };
+  }
+
+  private async parseResponseBody(response: Response): Promise<unknown> {
+    const text = await response.text();
+    if (!text) return undefined;
+
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      return text;
+    }
+  }
+
+  private async request<T>(path: string, init: JsonRequestInit = {}): Promise<T> {
     const token = await this.options.getAccessToken?.();
-    const response = await fetch(`${this.options.baseUrl}${path}`, {
+    const encodedBody = this.encodeBody(init.body);
+    const response = await fetch(this.buildUrl(path, init.query), {
       ...init,
+      body: encodedBody?.body,
       headers: {
-        'Content-Type': 'application/json',
+        ...(encodedBody?.contentType ? { 'Content-Type': encodedBody.contentType } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(init?.headers ?? {}),
       },
     });
 
-    if (!response.ok) {
-      throw new Error(`Aventi API error ${response.status}`);
-    }
-
     if (response.status === 204) {
       return undefined as T;
     }
 
-    return (await response.json()) as T;
+    const responseBody = await this.parseResponseBody(response);
+
+    if (!response.ok) {
+      const detail =
+        responseBody && typeof responseBody === 'object' && 'detail' in responseBody
+          ? String((responseBody as { detail: unknown }).detail)
+          : undefined;
+      throw new AventiApiError(
+        detail ?? `Aventi API error ${response.status}`,
+        response.status,
+        response.statusText,
+        responseBody,
+      );
+    }
+
+    return responseBody as T;
   }
 
   getHealth() {
-    return this.request<{ status: 'ok'; service: string }>(`/v1/health`);
+    return this.request<HealthResponse>(`/v1/health`);
   }
 
   bootstrapMe() {
-    return this.request<{
-      id: string;
-      email?: string | null;
-      created: boolean;
-      profile: MeProfile;
-    }>(`/v1/me/bootstrap`, { method: 'POST' });
+    return this.request<BootstrapMeResponse>(`/v1/me/bootstrap`, { method: 'POST' });
   }
 
   getMe() {
-    return this.request<{
-      id: string;
-      email?: string | null;
-      preferences: UserPreferences;
-      profile?: MeProfile;
-    }>(`/v1/me`);
+    return this.request<GetMeResponse>(`/v1/me`);
   }
 
   updateMyLocation(payload: ProfileLocationPayload) {
-    return this.request<{ ok: true; userId: string; profile: MeProfile }>(`/v1/me/location`, {
+    return this.request<UpdateMyLocationResponse>(`/v1/me/location`, {
       method: 'PUT',
-      body: JSON.stringify(payload),
+      body: payload,
+    });
+  }
+
+  resolveLocation(payload: LocationResolvePayload) {
+    return this.request<LocationResolveResponse>(`/v1/location/resolve`, {
+      method: 'POST',
+      body: payload,
     });
   }
 
   getFeed(payload: FeedRequest) {
-    const search = new URLSearchParams({
-      limit: String(payload.limit ?? 20),
-      date: payload.filters.date,
-      latitude: String(payload.latitude),
-      longitude: String(payload.longitude),
-      ...(payload.marketCity ? { marketCity: payload.marketCity } : {}),
-      ...(payload.marketState ? { marketState: payload.marketState } : {}),
-      ...(payload.marketCountry ? { marketCountry: payload.marketCountry } : {}),
-      ...(payload.filters.timeOfDay ? { timeOfDay: payload.filters.timeOfDay } : {}),
-      ...(payload.filters.price ? { price: payload.filters.price } : {}),
-      ...(payload.filters.radiusMiles ? { radiusMiles: String(payload.filters.radiusMiles) } : {}),
-      ...(payload.cursor ? { cursor: payload.cursor } : {}),
+    return this.request<FeedResponse>(`/v1/feed`, {
+      query: {
+        limit: payload.limit ?? 20,
+        date: payload.filters.date,
+        latitude: payload.latitude,
+        longitude: payload.longitude,
+        marketCity: payload.marketCity,
+        marketState: payload.marketState,
+        marketCountry: payload.marketCountry,
+        timeOfDay: payload.filters.timeOfDay,
+        price: payload.filters.price,
+        radiusMiles: payload.filters.radiusMiles,
+        cursor: payload.cursor,
+        vibes: payload.filters.vibes ?? [],
+        categories: payload.filters.categories ?? [],
+      },
     });
-    for (const vibe of payload.filters.vibes ?? []) {
-      search.append('vibes', vibe);
-    }
-    for (const category of payload.filters.categories ?? []) {
-      search.append('categories', category);
-    }
-    return this.request<FeedResponse>(`/v1/feed?${search.toString()}`);
   }
 
   refreshFeed(payload: FeedRequest) {
     return this.request<FeedResponse>(`/v1/feed/refresh`, {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: payload,
     });
   }
 
   postSwipe(payload: SwipePayload) {
-    return this.request<{
-      accepted: true;
-      remainingFreeSwipes?: number;
-      remainingFreePreferenceActions?: number;
-    }>(`/v1/swipes`, {
+    return this.request<SwipeResponse>(`/v1/swipes`, {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: payload,
     });
   }
 
   recordFeedImpression(payload: FeedImpressionPayload) {
-    return this.request<{ ok: true }>(`/v1/feed/impressions`, {
+    return this.request<FeedImpressionResponse>(`/v1/feed/impressions`, {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: payload,
     });
   }
 
   updatePreferences(payload: UserPreferences) {
-    return this.request<{ ok: true }>(`/v1/me/preferences`, {
+    return this.request<UpdatePreferencesResponse>(`/v1/me/preferences`, {
       method: 'PUT',
-      body: JSON.stringify(payload),
+      body: payload,
     });
   }
 
   resetSeenEvents() {
-    return this.request<{ ok: true; deleted: number }>(`/v1/me/seen-events/reset`, {
+    return this.request<ResetSeenEventsResponse>(`/v1/me/seen-events/reset`, {
       method: 'POST',
     });
   }
 
-  markMarketSeen(payload: {
-    city: string;
-    state?: string | null;
-    country?: string | null;
-    latitude?: number | null;
-    longitude?: number | null;
-  }) {
-    return this.request<{ ok: true; marketKey: string; bootstrapped: boolean }>(
-      `/v1/me/market-seen`,
-      {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      },
-    );
+  markMarketSeen(payload: MarketSeenPayload) {
+    return this.request<MarketSeenResponse>(`/v1/me/market-seen`, {
+      method: 'POST',
+      body: payload,
+    });
   }
 
   getEntitlements() {
@@ -169,10 +247,10 @@ export class AventiApiClient {
     });
   }
 
-  postAdminEnqueueMarketScan(payload: { marketKey: string }) {
+  postAdminEnqueueMarketScan(payload: AdminEnqueueMarketScanPayload) {
     return this.request<AdminEnqueueMarketScanResponse>(`/v1/admin/markets/enqueue-scan`, {
       method: 'POST',
-      body: JSON.stringify({ marketKey: payload.marketKey }),
+      body: payload,
     });
   }
 
@@ -181,24 +259,21 @@ export class AventiApiClient {
   }
 
   saveFavorite(eventId: string) {
-    return this.request<{ ok: true; eventId: string }>(`/v1/favorites/${eventId}`, {
+    return this.request<SaveFavoriteResponse>(`/v1/favorites/${eventId}`, {
       method: 'PUT',
     });
   }
 
   deleteFavorite(eventId: string) {
-    return this.request<{ ok: true; eventId: string }>(`/v1/favorites/${eventId}`, {
+    return this.request<DeleteFavoriteResponse>(`/v1/favorites/${eventId}`, {
       method: 'DELETE',
     });
   }
 
-  reportEvent(eventId: string, payload: { reason: ReportReason; details?: string }) {
-    return this.request<{ ok: true; eventId: string; reportCount: number; hidden: boolean }>(
-      `/v1/events/${eventId}/report`,
-      {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      },
-    );
+  reportEvent(eventId: string, payload: EventReportPayload) {
+    return this.request<EventReportResponse>(`/v1/events/${eventId}/report`, {
+      method: 'POST',
+      body: payload,
+    });
   }
 }

@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
-import type { Session } from '@supabase/supabase-js';
 import {
   Activity,
   ArrowDown,
@@ -50,6 +49,7 @@ import type {
   AdminUserLocationPoint,
   EventCard,
   EventCategory,
+  FeedInventoryStatus,
   EventVibeTag,
   FeedFilters,
   SwipeAction,
@@ -58,12 +58,10 @@ import {
   applySwipeAction,
   categoryLabels,
   categoryTopTags,
-  demoEvents,
   heroImages,
   vibeLabels,
 } from '@/lib/demo-data';
 import { createAventiApi } from '@/lib/api';
-import { supabase } from '@/lib/supabase';
 import { useAuthSession } from '@/lib/auth-session';
 import { AuthModal } from './AuthModal';
 import { Button, ButtonLink, Pill, Surface, glass, motion, type } from './ui/app-ui';
@@ -675,13 +673,90 @@ function MobileFilterSheet({
   );
 }
 
+type WebLocationStatus = 'idle' | 'checking' | 'ready' | 'denied' | 'error';
+
+interface WebLocationPoint {
+  latitude: number;
+  longitude: number;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  timezone?: string | null;
+}
+
+const LOCATION_OPTIONS: PositionOptions = {
+  enableHighAccuracy: false,
+  maximumAge: 60_000,
+  timeout: 12_000,
+};
+
+function resolveBrowserTimezone(): string | null {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function getBrowserLocation(): Promise<WebLocationPoint> {
+  return new Promise((resolve, reject) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      reject(new Error('Location is not available in this browser.'));
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        resolve({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          timezone: resolveBrowserTimezone(),
+        });
+      },
+      reject,
+      LOCATION_OPTIONS,
+    );
+  });
+}
+
+function formatLocationError(error: unknown): string {
+  if (
+    typeof GeolocationPositionError !== 'undefined' &&
+    error instanceof GeolocationPositionError
+  ) {
+    if (error.code === error.PERMISSION_DENIED) {
+      return 'Location permission is required to load events near you.';
+    }
+    if (error.code === error.POSITION_UNAVAILABLE) {
+      return 'Your browser could not determine your location.';
+    }
+    if (error.code === error.TIMEOUT) {
+      return 'Location lookup timed out. Try again.';
+    }
+  }
+  return error instanceof Error ? error.message : 'Unable to resolve your location.';
+}
+
+function isInventoryWarming(status: FeedInventoryStatus | null) {
+  return status === 'warming' || status === 'targeted_warming';
+}
+
 
 export function EventFeedPage() {
   const auth = useAuthSession();
-  const [events, setEvents] = useState<EventCard[]>(demoEvents);
+  const [events, setEvents] = useState<EventCard[]>([]);
   const [actions, setActions] = useState<Record<string, SwipeAction>>({});
-  const [selectedEvent, setSelectedEvent] = useState<EventCard | null>(demoEvents[0] ?? null);
+  const [selectedEvent, setSelectedEvent] = useState<EventCard | null>(null);
   const [isMining, setIsMining] = useState(false);
+  const [feedLoading, setFeedLoading] = useState(false);
+  const [feedError, setFeedError] = useState<string | null>(null);
+  const [locationStatus, setLocationStatus] = useState<WebLocationStatus>('idle');
+  const [location, setLocation] = useState<WebLocationPoint | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [inventoryStatus, setInventoryStatus] = useState<FeedInventoryStatus | null>(null);
+  const [feedRefreshToken, setFeedRefreshToken] = useState(0);
+  const forceRefreshRef = useRef(false);
+  const guestStartedRef = useRef(false);
   const [isFilterSheetOpen, setIsFilterSheetOpen] = useState(false);
   const [filters, setFilters] = useState<FeedFilters>({
     date: 'week',
@@ -691,13 +766,7 @@ export function EventFeedPage() {
     categories: [],
   });
 
-  const filteredEvents = useMemo(() => {
-    return events.filter((event) => {
-      const categoryMatch = !filters.categories?.length || filters.categories.includes(event.category);
-      const vibeMatch = !filters.vibes?.length || event.vibes.some((vibe) => filters.vibes?.includes(vibe));
-      return categoryMatch && vibeMatch;
-    });
-  }, [events, filters.categories, filters.vibes]);
+  const filteredEvents = events;
 
   const feedMainRef = useRef<HTMLElement>(null);
   const feedEndLatchedRef = useRef(false);
@@ -741,6 +810,128 @@ export function EventFeedPage() {
     };
   }, [filteredEvents, updateFeedScrollEnd]);
 
+  useEffect(() => {
+    if (!auth.isReady || auth.session || guestStartedRef.current) return;
+    guestStartedRef.current = true;
+    void auth.continueAsGuest().catch((error) => {
+      setFeedError(error instanceof Error ? error.message : 'Unable to start a guest session.');
+    });
+  }, [auth]);
+
+  useEffect(() => {
+    if (!auth.isReady || locationStatus !== 'idle') return;
+    let active = true;
+    setLocationStatus('checking');
+    setLocationError(null);
+    void getBrowserLocation()
+      .then((resolved) => {
+        if (!active) return;
+        setLocation(resolved);
+        setLocationStatus('ready');
+      })
+      .catch((error) => {
+        if (!active) return;
+        setLocation(null);
+        setLocationStatus(
+          error && typeof error === 'object' && 'code' in error && error.code === 1
+            ? 'denied'
+            : 'error',
+        );
+        setLocationError(formatLocationError(error));
+      });
+    return () => {
+      active = false;
+    };
+  }, [auth.isReady, locationStatus]);
+
+  useEffect(() => {
+    const accessToken = auth.session?.access_token ?? null;
+    if (!accessToken || !location) return;
+
+    let active = true;
+    const api = createAventiApi(accessToken);
+    setFeedLoading(true);
+    setFeedError(null);
+    setIsMining(true);
+
+    void (async () => {
+      try {
+        const resolvedLocation = await api
+          .resolveLocation({
+            latitude: location.latitude,
+            longitude: location.longitude,
+          })
+          .catch(() => location);
+
+        const request = {
+          latitude: resolvedLocation.latitude,
+          longitude: resolvedLocation.longitude,
+          marketCity: resolvedLocation.city ?? undefined,
+          marketState: resolvedLocation.state ?? undefined,
+          marketCountry: resolvedLocation.country ?? undefined,
+          limit: 20,
+          filters,
+        };
+
+        const syncCalls: Promise<unknown>[] = [
+          api.updateMyLocation({
+            latitude: resolvedLocation.latitude,
+            longitude: resolvedLocation.longitude,
+            city: resolvedLocation.city ?? null,
+            state: resolvedLocation.state ?? null,
+            country: resolvedLocation.country ?? null,
+            timezone: resolvedLocation.timezone ?? location.timezone ?? null,
+          }),
+        ];
+
+        if (resolvedLocation.city) {
+          syncCalls.push(
+            api.markMarketSeen({
+              city: resolvedLocation.city,
+              state: resolvedLocation.state ?? null,
+              country: resolvedLocation.country ?? null,
+              latitude: resolvedLocation.latitude,
+              longitude: resolvedLocation.longitude,
+            }),
+          );
+        }
+        void Promise.allSettled(syncCalls);
+
+        const result = forceRefreshRef.current
+          ? await api.refreshFeed(request)
+          : await api.getFeed(request);
+        forceRefreshRef.current = false;
+        if (!active) return;
+        setEvents(result.items);
+        setActions({});
+        setSelectedEvent(result.items[0] ?? null);
+        setInventoryStatus(result.inventoryStatus);
+        setIsMining(isInventoryWarming(result.inventoryStatus));
+      } catch (error) {
+        if (!active) return;
+        setFeedError(error instanceof Error ? error.message : 'Unable to load events from the backend.');
+        setEvents([]);
+        setSelectedEvent(null);
+        setInventoryStatus(null);
+        setIsMining(false);
+      } finally {
+        if (active) {
+          setFeedLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [auth.session?.access_token, feedRefreshToken, filters, location]);
+
+  useEffect(() => {
+    if (!isInventoryWarming(inventoryStatus) || events.length > 0 || feedLoading) return;
+    const timeout = window.setTimeout(() => setFeedRefreshToken((value) => value + 1), 5_000);
+    return () => window.clearTimeout(timeout);
+  }, [events.length, feedLoading, inventoryStatus]);
+
   function handleAction(event: EventCard, action: SwipeAction) {
     const result = applySwipeAction(events, actions, event.id, action);
     setActions(result.nextActions);
@@ -748,6 +939,19 @@ export function EventFeedPage() {
     if (action === 'pass') {
       setSelectedEvent(result.nextEvents[0] ?? null);
     }
+    const accessToken = auth.session?.access_token ?? null;
+    if (!accessToken) return;
+    const api = createAventiApi(accessToken);
+    if (action === 'like') {
+      void api.saveFavorite(event.id).catch(() => undefined);
+    }
+    void api.postSwipe({
+      eventId: event.id,
+      action,
+      surfacedAt: new Date().toISOString(),
+      position: events.findIndex((item) => item.id === event.id),
+      vibes: event.vibes,
+    }).catch(() => undefined);
   }
 
   function toggleCategory(category: EventCategory) {
@@ -769,13 +973,12 @@ export function EventFeedPage() {
   }
 
   function refreshFeed() {
-    setIsMining(true);
-    window.setTimeout(() => {
-      setEvents(demoEvents);
-      setActions({});
-      setSelectedEvent(demoEvents[0] ?? null);
-      setIsMining(false);
-    }, 900);
+    forceRefreshRef.current = true;
+    setFeedRefreshToken((value) => value + 1);
+  }
+
+  function retryLocation() {
+    setLocationStatus('idle');
   }
 
   // Open filter sheet when URL has ?filters=open. Re-runs on every nav so clicking
@@ -831,12 +1034,42 @@ export function EventFeedPage() {
                   onOpen={() => setSelectedEvent(event)}
                 />
               ))
+            ) : feedLoading || locationStatus === 'checking' || !auth.isReady ? (
+              <Surface elev className="grid place-items-center min-h-[320px] p-7 text-center gap-3">
+                <Loader2 size={28} className="animate-spin text-[var(--color-violet-bright)]" />
+                <h3 className={type.h1}>Loading nearby events</h3>
+                <p className={type.caption}>
+                  {locationStatus === 'checking'
+                    ? 'Getting your browser location first.'
+                    : 'Reading real events from the Aventi backend.'}
+                </p>
+              </Surface>
+            ) : locationError ? (
+              <Surface elev className="grid place-items-center min-h-[320px] p-7 text-center gap-3">
+                <MapPin size={28} className="text-[var(--color-danger-glow)]" />
+                <h3 className={type.h1}>Location needed</h3>
+                <p className={type.caption}>{locationError}</p>
+                <Button variant="primary" size="md" onClick={retryLocation}>
+                  Try location again
+                </Button>
+              </Surface>
+            ) : feedError ? (
+              <Surface elev className="grid place-items-center min-h-[320px] p-7 text-center gap-3">
+                <Sparkles size={28} className="text-[var(--color-danger-glow)]" />
+                <h3 className={type.h1}>Feed unavailable</h3>
+                <p className={type.caption}>{feedError}</p>
+                <Button variant="primary" size="md" onClick={refreshFeed}>
+                  Retry backend feed
+                </Button>
+              </Surface>
             ) : (
               <Surface elev className="grid place-items-center min-h-[320px] p-7 text-center gap-3">
                 <Sparkles size={28} className="text-[var(--color-app-mellow)]" />
                 <h3 className={type.h1}>No matches</h3>
                 <p className={type.caption}>
-                  Aventi would trigger a targeted warming scan for this filter signature.
+                  {isInventoryWarming(inventoryStatus)
+                    ? 'Aventi is warming this market. Check back in a moment.'
+                    : 'The backend did not return events for this location and filter set.'}
                 </p>
                 <Button variant="premium" size="md" onClick={refreshFeed}>
                   Mine more events

@@ -7,6 +7,7 @@ from aventi_backend.api.routes import (
     feed,
     health,
     internal,
+    location,
     me,
     membership,
     swipes,
@@ -16,6 +17,7 @@ api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
 api_router.include_router(me.router, prefix="/v1/me", tags=["me"])
 api_router.include_router(feed.router, prefix="/v1", tags=["feed"])
+api_router.include_router(location.router, prefix="/v1/location", tags=["location"])
 api_router.include_router(swipes.router, prefix="/v1", tags=["swipes"])
 api_router.include_router(favorites.router, prefix="/v1", tags=["favorites"])
 api_router.include_router(events.router, prefix="/v1", tags=["events"])

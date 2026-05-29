@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from aventi_backend.models.schemas import EVENT_CATEGORIES, EVENT_VIBE_TAGS
 
 
 @dataclass
@@ -28,10 +30,7 @@ class FeedFilterContext:
     time_of_day: str | None = None
     selected_vibes: list[str] | None = None
     categories: list[str] | None = None
-    supported_vibe_tags: set[str] = field(default_factory=lambda: {
-        "chill", "energetic", "intellectual", "romantic", "social",
-        "luxury", "live-music", "wellness", "late-night",
-    })
+    supported_vibe_tags: set[str] = field(default_factory=lambda: set(EVENT_VIBE_TAGS))
 
 
 class FeedQueryBuilder:
@@ -55,7 +54,7 @@ class FeedQueryBuilder:
         self._price_clause: str = ""
         self._query_params: dict[str, Any] = {}
 
-    def with_price_filter(self, price: str | None) -> "FeedQueryBuilder":
+    def with_price_filter(self, price: str | None) -> FeedQueryBuilder:
         """Add price filter (free/paid)."""
         if price in {"free", "paid"}:
             self._price_clause = "and e.is_free = :is_free"
@@ -236,7 +235,12 @@ class FeedItemFilter:
         self.context = context
 
     @staticmethod
-    def _haversine_miles(lat1: float, lon1: float, lat2: float | None, lon2: float | None) -> float | None:
+    def _haversine_miles(
+        lat1: float,
+        lon1: float,
+        lat2: float | None,
+        lon2: float | None,
+    ) -> float | None:
         """Calculate distance between two points in miles."""
         if lat2 is None or lon2 is None:
             return None
@@ -253,17 +257,25 @@ class FeedItemFilter:
         )
 
     @staticmethod
-    def _time_of_day_matches(starts_at: datetime, bucket: str | None, venue_tz: str | None = None) -> bool:
+    def _time_of_day_matches(
+        starts_at: datetime,
+        bucket: str | None,
+        venue_tz: str | None = None,
+    ) -> bool:
         """Check if event time matches the time-of-day bucket using local time."""
         if not bucket:
             return True
         # Use event's local timezone (or UTC if not available)
         from zoneinfo import ZoneInfo
-        tz = ZoneInfo(venue_tz) if venue_tz else timezone.utc
+        tz = ZoneInfo(venue_tz) if venue_tz else UTC
         try:
-            local_dt = starts_at.astimezone(tz) if starts_at.tzinfo else starts_at.replace(tzinfo=tz)
+            local_dt = (
+                starts_at.astimezone(tz)
+                if starts_at.tzinfo
+                else starts_at.replace(tzinfo=tz)
+            )
         except Exception:
-            local_dt = starts_at.replace(tzinfo=timezone.utc)
+            local_dt = starts_at.replace(tzinfo=UTC)
         hour = local_dt.hour
         buckets = {
             "morning": (5, 12),
@@ -285,14 +297,51 @@ class FeedItemFilter:
         tags: list[str],
     ) -> str:
         """Refine event category based on content analysis."""
-        text_content = f"{title or ''} {description or ''} {' '.join(vibes)} {' '.join(tags)}".lower()
+        text_content = (
+            f"{title or ''} {description or ''} {' '.join(vibes)} {' '.join(tags)}"
+        ).lower()
 
         category_keywords = {
-            "concerts": ["concert", "music", "musica", "dj", "band", "live music", "orchestra", "opera", "recital"],
-            "dining": ["food", "dinner", "lunch", "brunch", "restaurant", "tasting", "cocktail", "wine", "bar"],
+            "concerts": [
+                "concert",
+                "music",
+                "musica",
+                "dj",
+                "band",
+                "live music",
+                "orchestra",
+                "opera",
+                "recital",
+            ],
+            "dining": [
+                "food",
+                "dinner",
+                "lunch",
+                "brunch",
+                "restaurant",
+                "tasting",
+                "cocktail",
+                "wine",
+                "bar",
+            ],
             "nightlife": ["party", "club", "nightclub", "dance"],
             "wellness": ["wellness", "yoga", "meditation", "fitness", "spa"],
-            "experiences": ["poetry", "poet", "literary", "reading", "book", "author", "lecture", "talk", "workshop"],
+            "experiences": [
+                "poetry",
+                "poet",
+                "literary",
+                "reading",
+                "book",
+                "author",
+                "lecture",
+                "talk",
+                "workshop",
+            ],
+            "comedy": ["comedy", "comedian", "stand-up", "standup", "improv", "sketch"],
+            "sports": ["sports", "game", "match", "race", "run club", "climbing", "league"],
+            "outdoors": ["hike", "hiking", "outdoor", "outdoors", "cycling", "paddle", "camping"],
+            "markets": ["market", "farmers", "maker", "makers", "popup", "pop-up", "bazaar"],
+            "tech": ["tech", "startup", "demo", "hackathon", "developer", "ai ", "meetup"],
         }
 
         for cat, keywords in category_keywords.items():
@@ -300,8 +349,7 @@ class FeedItemFilter:
                 return cat
 
         normalized = (category or "").strip().lower()
-        valid_categories = {"nightlife", "dining", "concerts", "wellness", "experiences"}
-        if normalized in valid_categories:
+        if normalized in EVENT_CATEGORIES:
             return normalized
         if "energetic" in vibes:
             return "nightlife"

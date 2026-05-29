@@ -93,6 +93,11 @@ export interface FeedResponse {
   warmupTriggered: boolean;
 }
 
+export interface HealthResponse {
+  status: 'ok';
+  service: string;
+}
+
 export interface FavoritesResponse {
   items: string[];
   events?: EventCard[];
@@ -130,6 +135,35 @@ export interface ProfileLocationPayload {
   timezone?: string | null;
 }
 
+export interface LocationResolvePayload {
+  latitude: number;
+  longitude: number;
+}
+
+export interface LocationResolveResponse extends ProfileLocationPayload {
+  formattedAddress?: string | null;
+}
+
+export interface BootstrapMeResponse {
+  id: string;
+  email?: string | null;
+  created: boolean;
+  profile: MeProfile;
+}
+
+export interface GetMeResponse {
+  id: string;
+  email?: string | null;
+  preferences: UserPreferences;
+  profile?: MeProfile;
+}
+
+export interface UpdateMyLocationResponse {
+  ok: true;
+  userId: string;
+  profile: MeProfile;
+}
+
 export interface MeProfile {
   city?: string | null;
   state?: string | null;
@@ -150,6 +184,61 @@ export interface MembershipEntitlements {
   travelMode: boolean;
   insiderTips: boolean;
   validUntil?: string | null;
+}
+
+export interface SwipeResponse {
+  accepted: true;
+  remainingFreeSwipes?: number;
+  remainingFreePreferenceActions?: number;
+}
+
+export interface FeedImpressionResponse {
+  ok: true;
+}
+
+export interface UpdatePreferencesResponse {
+  ok: true;
+}
+
+export interface ResetSeenEventsResponse {
+  ok: true;
+  deleted: number;
+}
+
+export interface MarketSeenPayload {
+  city: string;
+  state?: string | null;
+  country?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+}
+
+export interface MarketSeenResponse {
+  ok: true;
+  marketKey: string;
+  bootstrapped: boolean;
+}
+
+export interface SaveFavoriteResponse {
+  ok: true;
+  eventId: string;
+}
+
+export interface DeleteFavoriteResponse {
+  ok: true;
+  eventId: string;
+}
+
+export interface EventReportPayload {
+  reason: ReportReason;
+  details?: string;
+}
+
+export interface EventReportResponse {
+  ok: true;
+  eventId: string;
+  reportCount: number;
+  hidden: boolean;
 }
 
 export type AdminMarketHeatTier = 'hot' | 'warm' | 'cold';
@@ -232,6 +321,10 @@ export interface AdminUserLocationsResponse {
 export interface AdminEnqueueMarketScanResponse {
   ok: true;
   jobId: string;
+  marketKey: string;
+}
+
+export interface AdminEnqueueMarketScanPayload {
   marketKey: string;
 }
 
