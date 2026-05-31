@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import boto3
+from botocore.config import Config
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
@@ -733,7 +735,9 @@ async def _scheduler_runs_dashboard(session: AsyncSession) -> list[dict]:
 async def _queue_attributes(settings: Settings, queue_url: str | None) -> dict:
     if not queue_url:
         return {"configured": False, "reason": "Queue URL is not configured."}
-    client_kwargs = {}
+    client_kwargs: dict[str, Any] = {
+        "config": Config(connect_timeout=5, read_timeout=10),
+    }
     if settings.aws_endpoint_url:
         client_kwargs["endpoint_url"] = settings.aws_endpoint_url
     try:

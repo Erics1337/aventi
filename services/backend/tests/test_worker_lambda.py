@@ -13,7 +13,7 @@ class FakeSession:
 
 
 class FakeLedger:
-    processing: list[JobRecord] = []
+    processing: list[dict[str, Any]] = []
     succeeded: list[tuple[str, dict[str, Any] | None]] = []
     failed: list[tuple[str, str, int, int | None]] = []
 
@@ -27,7 +27,13 @@ class FakeLedger:
         run_id: str | None = None,
         sqs_message_id: str | None = None,
     ) -> None:
-        self.processing.append(job)
+        self.processing.append(
+            {
+                "job": job,
+                "run_id": run_id,
+                "sqs_message_id": sqs_message_id,
+            }
+        )
 
     async def mark_succeeded(self, job_id: str, *, result: dict[str, Any] | None) -> None:
         self.succeeded.append((job_id, result))
@@ -113,7 +119,9 @@ async def test_process_records_accepts_valid_sqs_batch() -> None:
     assert seen_jobs[0].attempts == 2
     assert seen_jobs[0].max_attempts == 3
     assert seen_jobs[0].run_id == "message-1"
-    assert FakeLedger.processing[0].id == "job-1"
+    assert FakeLedger.processing[0]["job"].id == "job-1"
+    assert FakeLedger.processing[0]["run_id"] == "message-1"
+    assert FakeLedger.processing[0]["sqs_message_id"] == "message-1"
     assert FakeLedger.succeeded == [("job-1", {"ok": True})]
 
 

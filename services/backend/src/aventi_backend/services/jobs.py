@@ -266,9 +266,12 @@ class JobQueueRepository:
             yield session
 
     async def _execute_ledger(self, sql: str, params: dict[str, Any]) -> None:
-        async with self._ledger_session() as session:
-            await session.execute(text(sql), params)
-            await session.commit()
+        if self.ledger_session_factory is not None:
+            async with self._ledger_session() as session:
+                await session.execute(text(sql), params)
+                await session.commit()
+            return
+        await self.session.execute(text(sql), params)
 
 
 def build_manual_job(job_type: JobType, payload: dict[str, Any]) -> JobRecord:

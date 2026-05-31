@@ -266,6 +266,7 @@ class MarketWarmupService:
         *,
         job_id: str | None = None,
         force_discovery: bool = False,
+        scheduler_run_id: str | None = None,
     ) -> dict[str, Any]:
         started_at = datetime.now(tz=UTC)
         await self.state_store.mark_scan_started(market, started_at)
@@ -283,6 +284,7 @@ class MarketWarmupService:
                     source_url=_optional_str(source["base_url"]),
                     source_data=config.get("sourceData"),
                     job_id=job_id,
+                    scheduler_run_id=scheduler_run_id,
                 )
                 structured_runs.append(run)
 
@@ -290,7 +292,11 @@ class MarketWarmupService:
             discovery_jobs_enqueued = 0
             if force_discovery or visible_count < MARKET_WARM_TARGET:
                 for scan_plan in _scan_planner().warmup_discovery_scans():
-                    await self._enqueue_scan_plan(market, scan_plan)
+                    await self._enqueue_scan_plan(
+                        market,
+                        scan_plan,
+                        scheduler_run_id=scheduler_run_id,
+                    )
                     discovery_jobs_enqueued += 1
 
             visible_count = await self.refresh_market_inventory_state(market)

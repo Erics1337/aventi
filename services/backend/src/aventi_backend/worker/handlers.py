@@ -353,6 +353,7 @@ async def _handle_market_warmup(
         market,
         job_id=job.id,
         force_discovery=_parse_bool(payload.get("forceDiscovery")),
+        scheduler_run_id=job.scheduler_run_id,
     )
     return {"jobId": job.id, "jobType": str(job.type), **result}
 
