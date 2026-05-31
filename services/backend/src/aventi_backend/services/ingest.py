@@ -50,6 +50,8 @@ class ManualIngestService:
         events: list[dict[str, Any]],
         *,
         scan_meta: dict[str, Any] | None = None,
+        job_id: str | None = None,
+        scheduler_run_id: str | None = None,
     ) -> ManualIngestSummary:
         if not events:
             raise ValueError("Manual ingest requires at least one event payload")
@@ -59,6 +61,7 @@ class ManualIngestService:
             source_id=source["id"],
             city=city,
             discovered_count=len(events),
+            job_id=job_id,
         )
         await self.session.commit()
 
@@ -99,6 +102,7 @@ class ManualIngestService:
                     await JobQueueRepository(self.session).enqueue_job(
                         JobType.GENERATE_IMAGE,
                         {"eventId": event_id},
+                        scheduler_run_id=scheduler_run_id,
                     )
                     image_jobs_enqueued += 1
                     image_job_event_ids.add(event_id)
@@ -112,6 +116,10 @@ class ManualIngestService:
             }
             if scan_meta:
                 final_metadata.update(scan_meta)
+            if job_id:
+                final_metadata["jobId"] = job_id
+            if scheduler_run_id:
+                final_metadata["schedulerRunId"] = scheduler_run_id
 
             await self.ingest_runs.mark_done(
                 ingest_run_id=ingest_run["id"],

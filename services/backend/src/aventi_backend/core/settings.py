@@ -84,7 +84,12 @@ class Settings(BaseSettings):
     cors_origins: list[str] = ["*"]
     worker_poll_seconds: float = 2.0
     sqs_worker_queue_url: str | None = Field(default=None, alias="SQS_WORKER_QUEUE_URL")
+    sqs_worker_dlq_url: str | None = Field(default=None, alias="SQS_WORKER_DLQ_URL")
     aws_endpoint_url: str | None = Field(default=None, alias="AWS_ENDPOINT_URL")
+    market_scan_cron_expression: str | None = Field(
+        default=None,
+        alias="AVENTI_MARKET_SCAN_CRON_EXPRESSION",
+    )
     enable_verification: bool = Field(default=True, alias="AVENTI_ENABLE_VERIFICATION")
     seen_events_window_days: int = Field(default=30, alias="AVENTI_SEEN_EVENTS_WINDOW_DAYS")
 

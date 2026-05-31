@@ -7,9 +7,9 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from aventi_backend.core.settings import get_settings
 from aventi_backend.services.jobs import JobQueueRepository, JobType
 from aventi_backend.services.providers import MockVerifier, VerificationProvider
-from aventi_backend.core.settings import get_settings
 
 VERIFY_EVENT_COOLDOWN = timedelta(hours=6)
 
@@ -32,7 +32,13 @@ class VerificationService:
         else:
             self.verifier = verifier
 
-    async def enqueue_verification_jobs(self, limit: int = 20, *, event_ids: list[str] | None = None) -> int:
+    async def enqueue_verification_jobs(
+        self,
+        limit: int = 20,
+        *,
+        event_ids: list[str] | None = None,
+        scheduler_run_id: str | None = None,
+    ) -> int:
         now = datetime.now(tz=UTC)
         ids = event_ids
         if ids is None:
@@ -73,9 +79,16 @@ class VerificationService:
                 ),
                 {"event_id": event_id},
             )
-            if isinstance(latest_verification, datetime) and latest_verification >= now - VERIFY_EVENT_COOLDOWN:
+            if (
+                isinstance(latest_verification, datetime)
+                and latest_verification >= now - VERIFY_EVENT_COOLDOWN
+            ):
                 continue
-            await repo.enqueue_job(JobType.VERIFY_EVENT, {"eventId": event_id})
+            await repo.enqueue_job(
+                JobType.VERIFY_EVENT,
+                {"eventId": event_id},
+                scheduler_run_id=scheduler_run_id,
+            )
             count += 1
         return count
 
@@ -103,8 +116,13 @@ class VerificationService:
             await self.session.execute(
                 text(
                     """
-                    insert into public.verification_runs (event_id, status, verified_at, active, details)
-                    values (:event_id, 'indeterminate', :verified_at, null, cast(:details_json as jsonb))
+                    insert into public.verification_runs (
+                      event_id, status, verified_at, active, details
+                    )
+                    values (
+                      :event_id, 'indeterminate', :verified_at, null,
+                      cast(:details_json as jsonb)
+                    )
                     """
                 ),
                 {
@@ -161,8 +179,13 @@ class VerificationService:
         await self.session.execute(
             text(
                 """
-                insert into public.verification_runs (event_id, status, verified_at, active, details)
-                values (:event_id, :status, :verified_at, :active, cast(:details_json as jsonb))
+                insert into public.verification_runs (
+                  event_id, status, verified_at, active, details
+                )
+                values (
+                  :event_id, :status, :verified_at, :active,
+                  cast(:details_json as jsonb)
+                )
                 """
             ),
             {

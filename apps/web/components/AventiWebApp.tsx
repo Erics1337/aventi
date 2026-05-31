@@ -45,8 +45,11 @@ import {
 } from 'lucide-react';
 import type {
   AdminDashboardResponse,
+  AdminFeedDiagnosticResponse,
   AdminMarketSummary,
+  AdminSystemResponse,
   AdminUserLocationPoint,
+  AdminWorkerJobRecent,
   EventCard,
   EventCategory,
   FeedInventoryStatus,
@@ -141,6 +144,24 @@ function marketStatus(market: AdminMarketSummary) {
     return 'targeted_warming';
   }
   return 'ready';
+}
+
+function isOlderThan(value: string | null | undefined, minutes: number) {
+  if (!value) return false;
+  return Date.now() - new Date(value).getTime() > minutes * 60_000;
+}
+
+function minutesAgoLabel(value: string) {
+  const minutes = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 60_000));
+  if (minutes < 1) return 'Now';
+  if (minutes < 60) return `${minutes}m`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+function isJobStale(job: AdminWorkerJobRecent) {
+  if (job.status === 'processing') return isOlderThan(job.startedAt, 20);
+  if (job.status === 'queued' || job.status === 'sent') return isOlderThan(job.queuedAt, 10);
+  return false;
 }
 
 type LatLng = { lat: number; lng: number };
@@ -1159,6 +1180,7 @@ export function AdminPortalPage() {
   const [activeTab, setActiveTab] = useState<'people' | 'markets' | 'scans'>('people');
   const [dashboard, setDashboard] = useState<AdminDashboardResponse | null>(null);
   const [userLocations, setUserLocations] = useState<AdminUserLocationPoint[] | null>(null);
+  const [feedDiagnostic, setFeedDiagnostic] = useState<AdminFeedDiagnosticResponse | null>(null);
   const [peopleLoading, setPeopleLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
@@ -1227,6 +1249,18 @@ export function AdminPortalPage() {
     }
   }
 
+  async function loadFeedDiagnostic(marketKey: string) {
+    const t = auth.session?.access_token ?? null;
+    if (!t) return;
+    setActionError(null);
+    try {
+      const diagnostic = await createAventiApi(t).getAdminFeedDiagnostic(marketKey);
+      setFeedDiagnostic(diagnostic);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Unable to run feed diagnostic');
+    }
+  }
+
   useEffect(() => {
     if (auth.isReady && auth.session) {
       void loadDashboard(auth.session.access_token);
@@ -1251,8 +1285,10 @@ export function AdminPortalPage() {
     const tone =
       status === 'ready'
         ? 'bg-[rgba(77,255,168,0.10)] text-[var(--color-success-neon)] border-[var(--color-success-neon)]/40'
-        : status === 'warming' || status === 'targeted_warming' || status === 'running' || status === 'queued' || status === 'completed'
+        : status === 'warming' || status === 'targeted_warming' || status === 'running' || status === 'queued' || status === 'sent' || status === 'completed'
         ? 'bg-[rgba(47,143,104,0.14)] text-[var(--color-violet-bright)] border-[var(--color-violet)]/40'
+        : status === 'failed' || status === 'dead' || status === 'attention'
+        ? 'bg-[rgba(255,61,112,0.10)] text-[var(--color-danger-glow)] border-[var(--color-danger-glow)]/40'
         : status === 'succeeded'
         ? 'bg-[rgba(77,255,168,0.10)] text-[var(--color-success-neon)] border-[var(--color-success-neon)]/40'
         : 'bg-[var(--color-app-surface)] text-[var(--color-app-text-muted)] border-[var(--color-app-border)]';
@@ -1268,11 +1304,11 @@ export function AdminPortalPage() {
         <div className="max-w-[720px] mb-8">
           <Pill tone="violet">Admin portal</Pill>
           <h1 className={`${type.display} mt-3 mb-3`}>
-            Backend market scans, visible at a glance.
+            App health, visible at a glance.
           </h1>
           <p className={`${type.body} text-[var(--color-app-text-muted)] max-w-[560px]`}>
-            Operational views for heat tiers, inventory status, worker activity, ingest performance,
-            and verification queues — kept calm, not noisy.
+            Plain-language operations for event supply, markets, people, discovery,
+            and attention areas.
           </p>
         </div>
 
@@ -1280,7 +1316,7 @@ export function AdminPortalPage() {
           <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
             <div>
               <span className={`${type.label} text-[var(--color-app-text-muted)]`}>Operations</span>
-              <h2 className={`${type.h1} mt-1`}>Chron market scan console</h2>
+              <h2 className={`${type.h1} mt-1`}>Aventi operations dashboard</h2>
             </div>
             <div className="flex flex-wrap items-center gap-2 justify-end">
               <div
@@ -1298,9 +1334,17 @@ export function AdminPortalPage() {
                 </button>
                 <button className={tabBtn('scans')} type="button" onClick={() => setActiveTab('scans')}>
                   <Activity size={14} strokeWidth={1.6} />
-                  Scans
+                  Discovery
                 </button>
               </div>
+              <ButtonLink
+                href="/admin/system"
+                variant="secondary"
+                size="sm"
+                leadingIcon={<Code2 size={14} strokeWidth={1.6} />}
+              >
+                System
+              </ButtonLink>
               <Button
                 variant="secondary"
                 size="sm"
@@ -1353,10 +1397,13 @@ export function AdminPortalPage() {
             <>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
                 {[
-                  { label: 'Markets', value: dashboard.rollup.marketsTotal },
-                  { label: 'Hot markets', value: dashboard.rollup.hotMarkets },
-                  { label: 'Active scans', value: dashboard.rollup.activeScans },
-                  { label: 'Verification backlog', value: dashboard.rollup.verificationBacklog },
+                  {
+                    label: 'Events available this week',
+                    value: dashboard.appHealth.summary.eventsAvailableThisWeek,
+                  },
+                  { label: 'Active markets', value: dashboard.appHealth.summary.activeMarkets },
+                  { label: 'Feed views 7d', value: dashboard.appHealth.summary.feedViews7d },
+                  { label: 'Needs attention', value: dashboard.appHealth.attention.eventsNeedingAttention },
                 ].map((metric) => (
                   <div
                     key={metric.label}
@@ -1370,6 +1417,33 @@ export function AdminPortalPage() {
                     </strong>
                   </div>
                 ))}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-5">
+                {[
+                  ['Summary', dashboard.appHealth.summary.status],
+                  ['Events', dashboard.appHealth.events.status],
+                  ['Finding new events', dashboard.appHealth.discovery.status],
+                  ['People', dashboard.appHealth.people.status],
+                ].map(([label, status]) => (
+                  <div key={label} className={`${glass.card} p-4`}>
+                    <span className={`${type.label} text-[var(--color-app-text-muted)]`}>{label}</span>
+                    <strong className="block mt-2 text-[1rem]">{status}</strong>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid gap-3 mb-5">
+                {dashboard.appHealth.summary.eventsAvailableThisWeek === 0 ? (
+                  <p className={`${type.body} text-[var(--color-app-text-muted)]`}>
+                    No events yet. Import catalog markets or queue a scan.
+                  </p>
+                ) : null}
+                {dashboard.appHealth.summary.feedViews7d === 0 ? (
+                  <p className={`${type.body} text-[var(--color-app-text-muted)]`}>
+                    No feed activity yet. Open the app and view the feed.
+                  </p>
+                ) : null}
               </div>
 
               {activeTab === 'people' ? (
@@ -1446,7 +1520,21 @@ export function AdminPortalPage() {
                             >
                               {scanBusyKey === market.marketKey ? '…' : 'Queue'}
                             </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              type="button"
+                              leadingIcon={<Info size={12} strokeWidth={1.6} />}
+                              onClick={() => void loadFeedDiagnostic(market.marketKey)}
+                            >
+                              Diagnose
+                            </Button>
                           </span>
+                          {market.visibleEventCount7d === 0 ? (
+                            <span className="col-span-7 text-[0.78rem] text-[var(--color-app-text-muted)]">
+                              This market exists, but has no events available this week.
+                            </span>
+                          ) : null}
                         </div>
                       );
                     })}
@@ -1476,6 +1564,11 @@ export function AdminPortalPage() {
                             <span className="text-[var(--color-app-text-muted)]">Active users</span>
                             <span>{market.activeUserCount7d}</span>
                           </div>
+                          {market.visibleEventCount7d === 0 ? (
+                            <p className={`${type.caption} mt-2`}>
+                              This market exists, but has no events available this week.
+                            </p>
+                          ) : null}
                           <Button
                             variant="secondary"
                             size="sm"
@@ -1492,12 +1585,61 @@ export function AdminPortalPage() {
                           >
                             {scanBusyKey === market.marketKey ? 'Queueing…' : 'Queue short scan'}
                           </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            type="button"
+                            className="w-full"
+                            leadingIcon={<Info size={12} strokeWidth={1.6} />}
+                            onClick={() => void loadFeedDiagnostic(market.marketKey)}
+                          >
+                            Run feed diagnostic
+                          </Button>
                         </article>
                       );
                     })}
                   </div>
+                  {feedDiagnostic ? (
+                    <article className={`${glass.card} p-4 mt-4`}>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <span className={`${type.label} text-[var(--color-violet-bright)]`}>
+                            Feed empty diagnostic
+                          </span>
+                          <h3 className={`${type.h2} mt-1`}>
+                            {feedDiagnostic.city} · {feedDiagnostic.marketKey}
+                          </h3>
+                        </div>
+                        <span className={statusPill(feedDiagnostic.visibleEvents7d > 0 ? 'ready' : 'attention')}>
+                          {feedDiagnostic.visibleEvents7d > 0 ? 'Healthy' : 'Needs attention'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4 text-[0.82rem]">
+                        {[
+                          ['Events available this week', feedDiagnostic.visibleEvents7d],
+                          ['Upcoming occurrences', feedDiagnostic.upcomingOccurrences],
+                          ['Hidden events', feedDiagnostic.hiddenEvents],
+                          ['Missing images', feedDiagnostic.missingImages],
+                          ['Pending verification', feedDiagnostic.pendingVerification],
+                          ['Suspect/inactive', feedDiagnostic.suspectOrInactive],
+                          ['Active users', feedDiagnostic.activeUsers],
+                          ['Last updated', formatDateTime(feedDiagnostic.lastScanCompletedAt)],
+                        ].map(([label, value]) => (
+                          <div key={label} className="rounded-[8px] border border-[var(--color-app-border)] p-3">
+                            <span className={type.caption}>{label}</span>
+                            <strong className="block mt-1">{value}</strong>
+                          </div>
+                        ))}
+                      </div>
+                      {feedDiagnostic.filtersProducingZeroResults.length > 0 ? (
+                        <p className={`${type.body} mt-3 text-[var(--color-app-text-muted)]`}>
+                          Likely empty areas: {feedDiagnostic.filtersProducingZeroResults.join(', ')}
+                        </p>
+                      ) : null}
+                    </article>
+                  ) : null}
                 </>
-              ) : (
+              ) : activeTab === 'scans' ? (
                 <div className="grid gap-3">
                   {dashboard.ingestRuns.map((run) => (
                     <article
@@ -1562,7 +1704,7 @@ export function AdminPortalPage() {
                     </strong>
                   </article>
                 </div>
-              )}
+              ) : null}
             </>
           ) : null}
         </Surface>
@@ -1572,6 +1714,302 @@ export function AdminPortalPage() {
   );
 }
 
+function systemStatusPill(status: string) {
+  const danger = status === 'failed' || status === 'dead';
+  const good = status === 'succeeded' || status === 'ready';
+  const tone = danger
+    ? 'border-[var(--color-danger-glow)] text-[var(--color-danger-glow)] bg-[rgba(255,61,112,0.10)]'
+    : good
+    ? 'border-[var(--color-success-neon)]/40 text-[var(--color-success-neon)] bg-[rgba(77,255,168,0.10)]'
+    : 'border-[var(--color-violet)]/40 text-[var(--color-violet-bright)] bg-[rgba(47,143,104,0.14)]';
+  return `inline-flex items-center px-2.5 h-6 rounded-full text-[0.7rem] font-semibold border ${tone}`;
+}
+
+export function AdminSystemPage() {
+  const auth = useAuthSession();
+  const [system, setSystem] = useState<AdminSystemResponse | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+
+  async function loadSystem(token?: string | null) {
+    const t = token ?? auth.session?.access_token ?? null;
+    if (!t) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      setSystem(await createAventiApi(t).getAdminSystem());
+    } catch (err) {
+      setSystem(null);
+      setError(err instanceof Error ? err.message : 'Unable to load system dashboard');
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function runAction(action: string, runner: (token: string) => Promise<unknown>) {
+    const t = auth.session?.access_token ?? null;
+    if (!t) return;
+    setBusyAction(action);
+    setActionMessage(null);
+    setError(null);
+    try {
+      const result = await runner(t);
+      setActionMessage(JSON.stringify(result));
+      await loadSystem(t);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Action failed');
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  useEffect(() => {
+    if (auth.isReady && auth.session) {
+      void loadSystem(auth.session.access_token);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth.isReady]);
+
+  const workerHealth =
+    system && (system.workerJobs.summary.dead > 0 || system.workerJobs.summary.failed24h > 0)
+      ? 'Worker failing'
+      : system && system.workerJobs.recent.some((job) => isJobStale(job))
+      ? 'Worker delayed'
+      : 'Pipeline healthy';
+
+  return (
+    <AppShell active="admin">
+      <section className="scrollbar-none flex min-h-0 flex-1 flex-col overflow-y-auto px-4 sm:px-6 md:px-8 pt-6 md:pt-8 pb-12 max-w-[1180px] mx-auto w-full">
+        <div className="max-w-[760px] mb-8">
+          <Pill tone="violet">System</Pill>
+          <h1 className={`${type.display} mt-3 mb-3`}>Backend debug console.</h1>
+          <p className={`${type.body} text-[var(--color-app-text-muted)] max-w-[620px]`}>
+            Worker queues, scheduler runs, raw job errors, provider config, and smoke-test actions.
+          </p>
+        </div>
+
+        <Surface elev className="p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+            <div>
+              <span className={`${type.label} text-[var(--color-app-text-muted)]`}>Engineering</span>
+              <h2 className={`${type.h1} mt-1`}>Execution layer</h2>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <ButtonLink href="/admin" variant="secondary" size="sm" leadingIcon={<Gauge size={14} />}>
+                Operations
+              </ButtonLink>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => loadSystem()}
+                disabled={isLoading}
+                leadingIcon={<RefreshCcw size={14} />}
+              >
+                Refresh
+              </Button>
+            </div>
+          </div>
+
+          {error ? <p className={`${type.body} text-[var(--color-danger-glow)] mb-4`}>{error}</p> : null}
+          {actionMessage ? (
+            <p className={`${type.caption} text-[var(--color-app-text-muted)] mb-4 break-words`}>
+              {actionMessage}
+            </p>
+          ) : null}
+
+          {isLoading && !system ? (
+            <Surface className="grid gap-3 place-items-center p-8 text-center">
+              <Loader2 size={24} className="animate-spin text-[var(--color-violet-bright)]" />
+              <p className={type.body}>Loading system telemetry</p>
+            </Surface>
+          ) : system ? (
+            <div className="grid gap-5">
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                {[
+                  ['Worker health', workerHealth],
+                  ['Main queue', system.queues.main.configured ? system.queues.main.approximateDepth ?? 0 : 'missing'],
+                  ['DLQ', system.queues.dlq.configured ? system.queues.dlq.approximateDepth ?? 0 : 'missing'],
+                  ['Failed 24h', system.workerJobs.summary.failed24h],
+                  ['Dead jobs', system.workerJobs.summary.dead],
+                ].map(([label, value]) => (
+                  <div key={label} className={`${glass.card} p-4 min-h-[100px]`}>
+                    <span className={`${type.label} text-[var(--color-app-text-muted)]`}>{label}</span>
+                    <strong className="block mt-2 text-[1.35rem] leading-tight">{value}</strong>
+                  </div>
+                ))}
+              </div>
+
+              <div className={`${glass.card} p-4`}>
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                  <div>
+                    <h3 className={type.h2}>Smoke-test actions</h3>
+                    <p className={type.caption}>Creates visible scheduler or worker rows where applicable.</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="secondary" disabled={!!busyAction} onClick={() => void runAction('scheduler', (t) => createAventiApi(t).postAdminSchedulerSmoke(1))}>
+                      {busyAction === 'scheduler' ? 'Running...' : 'Scheduler smoke'}
+                    </Button>
+                    <Button size="sm" variant="secondary" disabled={!!busyAction} onClick={() => void runAction('verification', (t) => createAventiApi(t).postAdminVerificationSmoke(5))}>
+                      Verification smoke
+                    </Button>
+                    <Button size="sm" variant="secondary" disabled={!!busyAction} onClick={() => void runAction('image', (t) => createAventiApi(t).postAdminImageSmoke())}>
+                      Image smoke
+                    </Button>
+                    <Button size="sm" variant="secondary" disabled={!!busyAction} onClick={() => void runAction('feed', (t) => createAventiApi(t).postAdminFeedSmoke())}>
+                      Feed smoke
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">
+                <section className={`${glass.card} p-4`}>
+                  <h3 className={`${type.h2} mb-3`}>Scheduler runs</h3>
+                  <div className="grid gap-3">
+                    {system.schedulerRuns.length === 0 ? (
+                      <p className={`${type.body} text-[var(--color-app-text-muted)]`}>No scheduler runs recorded yet.</p>
+                    ) : (
+                      system.schedulerRuns.map((run) => (
+                        <article key={run.id} className="border-t border-[var(--color-app-border)] pt-3 first:border-t-0 first:pt-0">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <strong className="block text-[0.9rem]">{run.triggerType} · {run.id.slice(0, 8)}</strong>
+                              <span className={type.caption}>{formatDateTime(run.startedAt)}</span>
+                            </div>
+                            <span className={systemStatusPill(run.status)}>{run.status}</span>
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <span className={type.caption}>{run.jobsEnqueued} jobs</span>
+                            <span className={type.caption}>{run.marketsConsidered} markets</span>
+                            {run.error ? <span className="text-[var(--color-danger-glow)] text-[0.75rem]">{run.error}</span> : null}
+                          </div>
+                          <div className="mt-2 grid gap-1.5">
+                            {run.jobs.slice(0, 6).map((job) => (
+                              <div key={job.id} className="rounded-[8px] bg-[var(--color-app-surface)] border border-[var(--color-app-border)] px-2.5 py-2">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <span className="text-[0.76rem]">{job.jobType} {job.marketKey ? `· ${job.marketKey}` : ''}</span>
+                                  <span className={systemStatusPill(job.status)}>{job.status}</span>
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                  {job.traceSteps.map((step) => (
+                                    <span
+                                      key={`${job.id}-${step.label}`}
+                                      className={`rounded-full border px-2 py-0.5 text-[0.62rem] ${
+                                        step.status === 'complete'
+                                          ? 'border-[var(--color-success-neon)]/35 text-[var(--color-success-neon)]'
+                                          : step.status === 'failed'
+                                          ? 'border-[var(--color-danger-glow)]/50 text-[var(--color-danger-glow)]'
+                                          : 'border-[var(--color-app-border)] text-[var(--color-app-text-muted)]'
+                                      }`}
+                                    >
+                                      {step.label}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </article>
+                      ))
+                    )}
+                  </div>
+                </section>
+
+                <section className={`${glass.card} p-4`}>
+                  <h3 className={`${type.h2} mb-3`}>Recent jobs</h3>
+                  <div className="grid gap-3">
+                    {system.workerJobs.recent.map((job) => (
+                      <article key={job.id} className="rounded-[8px] border border-[var(--color-app-border)] bg-[var(--color-app-surface)] p-3">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <strong className="block text-[0.88rem]">{job.jobType}</strong>
+                            <span className={type.caption}>{job.id}</span>
+                          </div>
+                          <span className={systemStatusPill(job.status)}>{job.status}</span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <span className={type.caption}>attempt {job.attempts}/{job.maxAttempts}</span>
+                          {job.marketKey ? <span className={type.caption}>{job.marketKey}</span> : null}
+                          {job.schedulerRunId ? <span className={type.caption}>run {job.schedulerRunId.slice(0, 8)}</span> : null}
+                        </div>
+                        {job.lastError ? (
+                          <p className="mt-2 text-[0.76rem] text-[var(--color-danger-glow)] break-words">
+                            {job.lastError}
+                          </p>
+                        ) : null}
+                        <details className="mt-2">
+                          <summary className={`${type.caption} cursor-pointer`}>Payload/result</summary>
+                          <pre className="mt-2 max-h-[180px] overflow-auto rounded-[8px] border border-[var(--color-app-border)] bg-black/20 p-2 text-[0.68rem] whitespace-pre-wrap">
+                            {JSON.stringify(
+                              {
+                                payloadSummary: job.payloadSummary ?? {},
+                                result: job.result ?? {},
+                              },
+                              null,
+                              2,
+                            )}
+                          </pre>
+                        </details>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              </div>
+
+              <section className={`${glass.card} p-4`}>
+                <h3 className={`${type.h2} mb-3`}>Raw recent errors</h3>
+                {system.rawRecentErrors.length === 0 ? (
+                  <p className={`${type.body} text-[var(--color-app-text-muted)]`}>No recent worker or ingest errors recorded.</p>
+                ) : (
+                  <div className="grid gap-2">
+                    {system.rawRecentErrors.map((item) => (
+                      <article key={`${item.source}-${item.id}`} className="rounded-[8px] border border-[var(--color-app-border)] bg-[var(--color-app-surface)] p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <strong className="text-[0.82rem]">{item.source} · {item.id.slice(0, 12)}</strong>
+                          <span className={type.caption}>{formatDateTime(item.occurredAt)}</span>
+                        </div>
+                        <p className="mt-2 text-[0.76rem] text-[var(--color-danger-glow)] break-words">
+                          {item.error}
+                        </p>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <div className={`${glass.card} p-4 grid gap-3 md:grid-cols-3`}>
+                <div>
+                  <h3 className={type.h2}>EventBridge</h3>
+                  <p className={type.caption}>
+                    {system.eventBridge.configured ? system.eventBridge.scheduleExpression : 'Schedule expression missing'}
+                  </p>
+                </div>
+                <div>
+                  <h3 className={type.h2}>Providers</h3>
+                  <p className={type.caption}>
+                    Google {system.providers.googleApiKeyConfigured ? 'set' : 'missing'} · SerpAPI {system.providers.serpApiKeyConfigured ? 'set' : 'missing'} · Images {system.providers.pollinationsApiKeyConfigured ? 'set' : 'missing'}
+                  </p>
+                </div>
+                <div>
+                  <h3 className={type.h2}>Retention</h3>
+                  <p className={type.caption}>
+                    Succeeded {system.retention.succeededJobsDays}d · failed/dead {system.retention.failedDeadJobsDays}d · scheduler {system.retention.schedulerRunsDays}d
+                  </p>
+                  <p className={`${type.caption} mt-1`}>
+                    Candidates: {system.retention.candidates.succeededJobs} succeeded · {system.retention.candidates.failedDeadJobs} failed/dead · {system.retention.candidates.schedulerRuns} scheduler
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </Surface>
+      </section>
+      <AuthModal />
+    </AppShell>
+  );
+}
 
 export function SavedPage() {
   // TODO(saved): Wire up to real persistence (Supabase favorites table).
@@ -1771,4 +2209,3 @@ export function ProfilePage() {
 
 // Re-export marketing home from its dedicated module.
 export { MarketingHome } from './marketing/MarketingHome';
-

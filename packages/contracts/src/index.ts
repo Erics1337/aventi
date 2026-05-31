@@ -328,6 +328,214 @@ export interface AdminEnqueueMarketScanPayload {
   marketKey: string;
 }
 
+export interface AdminWorkerJobSummary {
+  queued: number;
+  sent: number;
+  processing: number;
+  succeeded24h: number;
+  failed24h: number;
+  dead: number;
+  oldestQueuedAt?: string | null;
+  lastSuccessAt?: string | null;
+  lastFailureAt?: string | null;
+}
+
+export interface AdminWorkerJobTypeSummary {
+  jobType: string;
+  queued: number;
+  sent: number;
+  processing: number;
+  succeeded24h: number;
+  failed24h: number;
+  dead: number;
+}
+
+export interface AdminWorkerJobRecent {
+  id: string;
+  jobType: string;
+  status: string;
+  marketKey?: string | null;
+  schedulerRunId?: string | null;
+  ingestRunId?: string | null;
+  payloadSummary?: Record<string, unknown>;
+  result?: Record<string, unknown>;
+  attempts: number;
+  maxAttempts: number;
+  queuedAt: string;
+  sentAt?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  lastError?: string | null;
+  runId?: string | null;
+}
+
+export interface AdminWorkerJobsDashboard {
+  summary: AdminWorkerJobSummary;
+  byType: AdminWorkerJobTypeSummary[];
+  recent: AdminWorkerJobRecent[];
+}
+
+export type AdminHealthStatus = 'Healthy' | 'Needs attention' | 'No data yet' | 'Setup needed';
+
+export interface AdminAppHealthDashboard {
+  summary: {
+    status: AdminHealthStatus;
+    eventsAvailableThisWeek: number;
+    upcomingEvents: number;
+    activeMarkets: number;
+    activeUsers7d: number;
+    feedViews7d: number;
+    saves7d: number;
+  };
+  events: {
+    status: AdminHealthStatus;
+    hidden: number;
+    missingImages: number;
+    needsAttention: number;
+    reported30d: number;
+  };
+  discovery: {
+    status: AdminHealthStatus;
+    eventsFound7d: number;
+    eventsInserted7d: number;
+    lastSuccessfulImportAt?: string | null;
+    lastFailedImportAt?: string | null;
+  };
+  people: {
+    status: AdminHealthStatus;
+    activeUsers7d: number;
+    feedViews7d: number;
+    saves7d: number;
+  };
+  attention: {
+    status: AdminHealthStatus;
+    emptyMarkets: number;
+    eventsNeedingAttention: number;
+    missingImages: number;
+    reportedEvents30d: number;
+  };
+}
+
+export interface AdminSchedulerRunJob {
+  id: string;
+  jobType: string;
+  status: string;
+  marketKey?: string | null;
+  attempts: number;
+  maxAttempts: number;
+  queuedAt?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  lastError?: string | null;
+  payloadSummary?: Record<string, unknown>;
+  result?: Record<string, unknown>;
+  ingestRunId?: string | null;
+  ingestStatus?: string | null;
+  discoveredCount?: number | null;
+  insertedCount?: number | null;
+  traceSteps: Array<{
+    label: string;
+    status: 'pending' | 'current' | 'complete' | 'failed' | string;
+  }>;
+}
+
+export interface AdminSchedulerRunSummary {
+  id: string;
+  triggerType: 'cron' | 'admin' | 'smoke' | string;
+  status: 'running' | 'succeeded' | 'failed' | string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  marketsConsidered: number;
+  marketsEnqueued: number;
+  jobsEnqueued: number;
+  limit?: number | null;
+  error?: string | null;
+  result: Record<string, unknown>;
+  jobs: AdminSchedulerRunJob[];
+}
+
+export interface AdminQueueStatus {
+  configured: boolean;
+  reachable?: boolean;
+  reason?: string;
+  error?: string;
+  approximateDepth?: number;
+  approximateNotVisible?: number;
+  oldestMessageAgeSeconds?: number;
+}
+
+export interface AdminSystemResponse {
+  workerJobs: AdminWorkerJobsDashboard;
+  schedulerRuns: AdminSchedulerRunSummary[];
+  rawRecentErrors: Array<{
+    source: string;
+    id: string;
+    occurredAt?: string | null;
+    error?: string | null;
+  }>;
+  queues: {
+    main: AdminQueueStatus;
+    dlq: AdminQueueStatus;
+  };
+  eventBridge: {
+    configured: boolean;
+    enabled: boolean;
+    scheduleExpression?: string | null;
+    lastRun?: AdminSchedulerRunSummary | null;
+  };
+  providers: {
+    googleApiKeyConfigured: boolean;
+    serpApiKeyConfigured: boolean;
+    pollinationsApiKeyConfigured: boolean;
+  };
+  retention: {
+    succeededJobsDays: number;
+    failedDeadJobsDays: number;
+    schedulerRunsDays: number;
+    automaticCleanupEnabled: boolean;
+    candidates: {
+      succeededJobs: number;
+      failedDeadJobs: number;
+      schedulerRuns: number;
+    };
+  };
+}
+
+export interface AdminFeedDiagnosticResponse {
+  marketKey: string;
+  city: string;
+  state?: string | null;
+  country: string;
+  visibleEvents7d: number;
+  upcomingOccurrences: number;
+  hiddenEvents: number;
+  pendingVerification: number;
+  suspectOrInactive: number;
+  missingImages: number;
+  lastSuccessfulScan?: string | null;
+  lastFailedScan?: string | null;
+  lastScanCompletedAt?: string | null;
+  lastScanSucceededAt?: string | null;
+  lastError?: string | null;
+  activeUsers: number;
+  filtersProducingZeroResults: string[];
+}
+
+export interface AdminSmokeActionResponse {
+  ok?: true;
+  status?: string;
+  schedulerRunId?: string;
+  jobsEnqueued?: number;
+  jobId?: string;
+  eventId?: string;
+  reason?: string;
+  eventsAvailableThisWeek?: number;
+  feedItemsReturned?: number;
+  hasMore?: boolean;
+  marketKey?: string;
+  diagnostic?: AdminFeedDiagnosticResponse;
+}
+
 export interface AdminDashboardResponse {
   rollup: {
     marketsTotal: number;
@@ -346,6 +554,8 @@ export interface AdminDashboardResponse {
     pollSeconds: number;
     endpointUrl?: string | null;
   };
+  workerJobs: AdminWorkerJobsDashboard;
+  appHealth: AdminAppHealthDashboard;
 }
 
 export const RANKING_CONSTANTS = {

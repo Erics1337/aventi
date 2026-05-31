@@ -68,6 +68,8 @@ class FakeIngestService:
         city: str,
         events: list[dict[str, Any]],
         scan_meta: dict[str, Any] | None = None,
+        job_id: str | None = None,
+        scheduler_run_id: str | None = None,
     ) -> FakeIngestSummary:
         self.calls.append(
             {
@@ -75,6 +77,8 @@ class FakeIngestService:
                 "city": city,
                 "events": events,
                 "scan_meta": scan_meta,
+                "job_id": job_id,
+                "scheduler_run_id": scheduler_run_id,
             }
         )
         return FakeIngestSummary(event_ids=["event-1"], discovered=len(events))
@@ -91,8 +95,15 @@ class FakeVerificationService:
         limit: int = 20,
         *,
         event_ids: list[str] | None = None,
+        scheduler_run_id: str | None = None,
     ) -> int:
-        self.calls.append({"limit": limit, "event_ids": event_ids})
+        self.calls.append(
+            {
+                "limit": limit,
+                "event_ids": event_ids,
+                "scheduler_run_id": scheduler_run_id,
+            }
+        )
         return len(event_ids or [])
 
 
@@ -214,6 +225,7 @@ async def test_ingest_success_enqueues_verification_when_enabled() -> None:
         angle="events",
         source_name="serpapi",
         job_id="job-1",
+        scheduler_run_id="11111111-1111-1111-1111-111111111111",
         extra_meta={"scanType": "weekly"},
     )
 
@@ -221,6 +233,16 @@ async def test_ingest_success_enqueues_verification_when_enabled() -> None:
     assert result["scanMeta"]["pagesFetched"] == 1
     assert result["scanMeta"]["scanType"] == "weekly"
     assert FakeIngestService.calls[0]["events"][0]["metadata"]["discoveredByJobId"] == "job-1"
-    assert FakeVerificationService.calls == [{"limit": 1, "event_ids": ["event-1"]}]
+    assert (
+        FakeIngestService.calls[0]["scheduler_run_id"]
+        == "11111111-1111-1111-1111-111111111111"
+    )
+    assert FakeVerificationService.calls == [
+        {
+            "limit": 1,
+            "event_ids": ["event-1"],
+            "scheduler_run_id": "11111111-1111-1111-1111-111111111111",
+        }
+    ]
     assert result["verificationJobsEnqueued"] == 1
     assert inventory_state.refreshes == ["denver|co|us"]

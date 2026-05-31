@@ -113,8 +113,11 @@ resource "aws_iam_role_policy" "lambda_sqs" {
           "sqs:GetQueueAttributes",
           "sqs:SendMessage"
         ]
-        Effect   = "Allow"
-        Resource = aws_sqs_queue.worker_jobs.arn
+        Effect = "Allow"
+        Resource = [
+          aws_sqs_queue.worker_jobs.arn,
+          aws_sqs_queue.worker_jobs_dlq.arn
+        ]
       }
     ]
   })
@@ -156,9 +159,11 @@ resource "aws_lambda_function" "worker" {
   environment {
     variables = merge(
       {
-        AVENTI_ENV                 = var.environment
-        AVENTI_RUNTIME_SECRET_NAME = local.runtime_secret_name
-        SQS_WORKER_QUEUE_URL       = aws_sqs_queue.worker_jobs.url
+        AVENTI_ENV                         = var.environment
+        AVENTI_RUNTIME_SECRET_NAME         = local.runtime_secret_name
+        SQS_WORKER_QUEUE_URL               = aws_sqs_queue.worker_jobs.url
+        SQS_WORKER_DLQ_URL                 = aws_sqs_queue.worker_jobs_dlq.url
+        AVENTI_MARKET_SCAN_CRON_EXPRESSION = var.market_scan_cron_expression
       },
       var.worker_environment
     )
@@ -213,8 +218,11 @@ resource "aws_iam_role_policy" "lambda_api_sqs" {
           "sqs:GetQueueUrl",
           "sqs:SendMessage"
         ]
-        Effect   = "Allow"
-        Resource = aws_sqs_queue.worker_jobs.arn
+        Effect = "Allow"
+        Resource = [
+          aws_sqs_queue.worker_jobs.arn,
+          aws_sqs_queue.worker_jobs_dlq.arn
+        ]
       }
     ]
   })
@@ -256,9 +264,11 @@ resource "aws_lambda_function" "api" {
   environment {
     variables = merge(
       {
-        AVENTI_ENV                 = var.environment
-        AVENTI_RUNTIME_SECRET_NAME = local.runtime_secret_name
-        SQS_WORKER_QUEUE_URL       = aws_sqs_queue.worker_jobs.url
+        AVENTI_ENV                         = var.environment
+        AVENTI_RUNTIME_SECRET_NAME         = local.runtime_secret_name
+        SQS_WORKER_QUEUE_URL               = aws_sqs_queue.worker_jobs.url
+        SQS_WORKER_DLQ_URL                 = aws_sqs_queue.worker_jobs_dlq.url
+        AVENTI_MARKET_SCAN_CRON_EXPRESSION = var.market_scan_cron_expression
       },
       var.api_environment
     )
@@ -326,9 +336,11 @@ resource "aws_lambda_function" "scheduler" {
   environment {
     variables = merge(
       {
-        AVENTI_ENV                 = var.environment
-        AVENTI_RUNTIME_SECRET_NAME = local.runtime_secret_name
-        SQS_WORKER_QUEUE_URL       = aws_sqs_queue.worker_jobs.url
+        AVENTI_ENV                         = var.environment
+        AVENTI_RUNTIME_SECRET_NAME         = local.runtime_secret_name
+        SQS_WORKER_QUEUE_URL               = aws_sqs_queue.worker_jobs.url
+        SQS_WORKER_DLQ_URL                 = aws_sqs_queue.worker_jobs_dlq.url
+        AVENTI_MARKET_SCAN_CRON_EXPRESSION = var.market_scan_cron_expression
       },
       var.worker_environment
     )

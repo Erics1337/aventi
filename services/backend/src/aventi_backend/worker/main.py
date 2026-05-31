@@ -1,21 +1,20 @@
 import asyncio
-import socket
 import json
+import socket
 from datetime import UTC, datetime
 from typing import NoReturn
 from urllib.parse import urlparse
 
 import boto3
-from botocore.exceptions import ClientError, EndpointConnectionError
-
 import structlog
+from botocore.exceptions import ClientError, EndpointConnectionError
 from watchfiles import run_process
 from watchfiles.filters import PythonFilter
 
 from aventi_backend.core.logging import configure_logging
-from aventi_backend.core.settings import get_settings, Settings
+from aventi_backend.core.settings import Settings, get_settings
 from aventi_backend.db.session import open_db_session
-from aventi_backend.services.jobs import JobRecord, JobType
+from aventi_backend.services.jobs import JobQueueRepository, JobRecord, JobType
 from aventi_backend.worker.handlers import process_job
 
 logger = structlog.get_logger(__name__)
@@ -90,7 +89,11 @@ async def _ensure_queue_exists(settings: Settings) -> boto3.client:
                 )
                 raise
             queue_name = _extract_queue_name_from_url(settings.sqs_worker_queue_url)
-            logger.info("worker.queue.creating", queue_name=queue_name, queue_url=settings.sqs_worker_queue_url)
+            logger.info(
+                "worker.queue.creating",
+                queue_name=queue_name,
+                queue_url=settings.sqs_worker_queue_url,
+            )
             try:
                 await asyncio.to_thread(
                     sqs_client.create_queue,
@@ -100,7 +103,11 @@ async def _ensure_queue_exists(settings: Settings) -> boto3.client:
             except EndpointConnectionError as exc:
                 _exit_sqs_unreachable(settings, exc)
             except ClientError as create_exc:
-                logger.error("worker.queue.create_failed", queue_name=queue_name, error=str(create_exc))
+                logger.error(
+                    "worker.queue.create_failed",
+                    queue_name=queue_name,
+                    error=str(create_exc),
+                )
                 raise
         else:
             raise
@@ -137,7 +144,7 @@ async def worker_loop() -> None:
 
                 messages = response.get("Messages", [])
                 if not messages:
-                    # no messages, poll_seconds is meant as the sleep when idle but wait_time acts as that
+                    # poll_seconds is for idle sleep, but WaitTimeSeconds already handles it here.
                     continue
 
                 for message in messages:
@@ -146,15 +153,21 @@ async def worker_loop() -> None:
 
                     try:
                         body = json.loads(raw_body)
-                        # We handle basic validation (it could be an unformatted message in prod if manually pushed via AWS CLI, assuming our format is "v1")
+                        # Validate enough to avoid manually pushed malformed messages poisoning SQS.
                         job_id = body.get("job_id", "unknown")
                         job_type_str = body.get("job_type")
                         if not job_type_str:
                             raise ValueError("job_type missing")
                         job_type = JobType(job_type_str)
                         payload = body.get("payload", {})
-                        attempts = int(message.get("Attributes", {}).get("ApproximateReceiveCount", body.get("attempts", 0)))
-                        max_attempts = body.get("max_attempts", 5)
+                        attempts = int(
+                            message.get("Attributes", {}).get(
+                                "ApproximateReceiveCount",
+                                body.get("attempts", 0),
+                            )
+                        )
+                        max_attempts = int(body.get("max_attempts", 5))
+                        scheduler_run_id = body.get("scheduler_run_id")
 
                         job = JobRecord(
                             id=job_id,
@@ -163,6 +176,10 @@ async def worker_loop() -> None:
                             run_at=datetime.now(tz=UTC),
                             attempts=attempts,
                             max_attempts=max_attempts,
+                            run_id=message.get("MessageId"),
+                            scheduler_run_id=scheduler_run_id
+                            if isinstance(scheduler_run_id, str)
+                            else None,
                         )
 
                         logger.info(
@@ -184,8 +201,41 @@ async def worker_loop() -> None:
 
                     # Execute the job context
                     async with open_db_session() as session:
+                        ledger = JobQueueRepository(session)
                         try:
+                            await ledger.mark_processing(
+                                job,
+                                run_id=message.get("MessageId"),
+                                sqs_message_id=message.get("MessageId"),
+                            )
+                            if job.attempts > job.max_attempts:
+                                await ledger.mark_failed(
+                                    job.id,
+                                    error=(
+                                        "maximum attempts exceeded "
+                                        f"({job.attempts}/{job.max_attempts})"
+                                    ),
+                                    attempts=job.attempts,
+                                    max_attempts=job.max_attempts,
+                                )
+                                await asyncio.to_thread(
+                                    sqs_client.delete_message,
+                                    QueueUrl=settings.sqs_worker_queue_url,
+                                    ReceiptHandle=receipt_handle,
+                                )
+                                logger.warning(
+                                    "worker.job.dead_skipped",
+                                    job_id=job.id,
+                                    job_type=job.type,
+                                    attempts=job.attempts,
+                                    max_attempts=job.max_attempts,
+                                )
+                                continue
                             result = await process_job(job, session)
+                            await ledger.mark_succeeded(
+                                job.id,
+                                result=result if isinstance(result, dict) else {"result": result},
+                            )
                             # On success, delete message from SQS
                             await asyncio.to_thread(
                                 sqs_client.delete_message,
@@ -202,9 +252,20 @@ async def worker_loop() -> None:
                             logger.info("worker.job.interrupted", job_id=job.id, job_type=job.type)
                             raise
                         except Exception as exc:  # noqa: BLE001
+                            await ledger.mark_failed(
+                                job.id,
+                                error=str(exc),
+                                attempts=job.attempts,
+                                max_attempts=job.max_attempts,
+                            )
                             # We let SQS default redelivery visibility timeout handle failures.
                             # Just log it for now
-                            logger.exception("worker.job.failed", job_id=job.id, job_type=job.type, error=str(exc))
+                            logger.exception(
+                                "worker.job.failed",
+                                job_id=job.id,
+                                job_type=job.type,
+                                error=str(exc),
+                            )
 
             except RuntimeError as exc:
                 logger.error("worker.misconfigured", error=str(exc))

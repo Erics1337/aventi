@@ -42,6 +42,7 @@ class IngestRunRepository:
         source_id: str,
         city: str,
         discovered_count: int,
+        job_id: str | None = None,
     ) -> dict[str, Any]:
         result = await self.session.execute(
             text(
@@ -52,6 +53,7 @@ class IngestRunRepository:
                     status,
                     started_at,
                     discovered_count,
+                    job_id,
                     metadata,
                     created_at
                 )
@@ -61,6 +63,7 @@ class IngestRunRepository:
                     'running',
                     now(),
                     :discovered_count,
+                    :job_id,
                     '{}'::jsonb,
                     now()
                 )
@@ -71,6 +74,7 @@ class IngestRunRepository:
                 "source_id": source_id,
                 "city": city,
                 "discovered_count": discovered_count,
+                "job_id": job_id,
             },
         )
         row = result.mappings().one()

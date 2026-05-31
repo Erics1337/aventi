@@ -37,6 +37,8 @@ class ManualIngest(Protocol):
         city: str,
         events: list[dict[str, Any]],
         scan_meta: dict[str, Any] | None = None,
+        job_id: str | None = None,
+        scheduler_run_id: str | None = None,
     ) -> IngestSummary: ...
 
 
@@ -46,6 +48,7 @@ class VerificationEnqueuer(Protocol):
         limit: int = 20,
         *,
         event_ids: list[str] | None = None,
+        scheduler_run_id: str | None = None,
     ) -> int: ...
 
 
@@ -83,6 +86,7 @@ class MarketScanExecutionService:
         source_url: str | None = None,
         source_data: Any = None,
         job_id: str | None = None,
+        scheduler_run_id: str | None = None,
         feed_filters: dict[str, Any] | None = None,
         latitude: float | None = None,
         longitude: float | None = None,
@@ -165,6 +169,8 @@ class MarketScanExecutionService:
             city=market.city,
             events=manual_events,
             scan_meta=scan_meta,
+            job_id=job_id,
+            scheduler_run_id=scheduler_run_id,
         )
 
         verification_enqueued = 0
@@ -174,6 +180,7 @@ class MarketScanExecutionService:
             ).enqueue_verification_jobs(
                 limit=len(ingest_summary.event_ids),
                 event_ids=ingest_summary.event_ids,
+                scheduler_run_id=scheduler_run_id,
             )
         await self.inventory_state.refresh_market_inventory_state(market)
         return {
