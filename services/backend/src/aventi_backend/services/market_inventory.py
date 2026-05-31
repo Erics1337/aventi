@@ -69,6 +69,7 @@ async def execute_market_scan(
     source_url: str | None = None,
     source_data: Any = None,
     job_id: str | None = None,
+    scheduler_run_id: str | None = None,
     feed_filters: dict[str, Any] | None = None,
     latitude: float | None = None,
     longitude: float | None = None,
@@ -85,6 +86,7 @@ async def execute_market_scan(
         source_url=source_url,
         source_data=source_data,
         job_id=job_id,
+        scheduler_run_id=scheduler_run_id,
         feed_filters=feed_filters,
         latitude=latitude,
         longitude=longitude,
@@ -133,7 +135,12 @@ class MarketWarmupService:
         """
         return await self.state_store.sync_market_inventory_from_event_venues()
 
-    async def enqueue_admin_short_market_scan(self, market_key: str) -> JobRecord:
+    async def enqueue_admin_short_market_scan(
+        self,
+        market_key: str,
+        *,
+        scheduler_run_id: str | None = None,
+    ) -> JobRecord:
         """Queue a single short-window ``MARKET_SCAN`` (SerpAPI) for an existing market row."""
         market = await self.state_store.get_market_by_key(market_key)
         if market is None:
@@ -142,7 +149,11 @@ class MarketWarmupService:
             market,
             last_scan_requested_at=datetime.now(tz=UTC),
         )
-        return await self._enqueue_scan_plan(market, _scan_planner().admin_short_scan(market))
+        return await self._enqueue_scan_plan(
+            market,
+            _scan_planner().admin_short_scan(market),
+            scheduler_run_id=scheduler_run_id,
+        )
 
     async def request_warmup(
         self,
@@ -255,6 +266,7 @@ class MarketWarmupService:
         *,
         job_id: str | None = None,
         force_discovery: bool = False,
+        scheduler_run_id: str | None = None,
     ) -> dict[str, Any]:
         started_at = datetime.now(tz=UTC)
         await self.state_store.mark_scan_started(market, started_at)
@@ -272,6 +284,7 @@ class MarketWarmupService:
                     source_url=_optional_str(source["base_url"]),
                     source_data=config.get("sourceData"),
                     job_id=job_id,
+                    scheduler_run_id=scheduler_run_id,
                 )
                 structured_runs.append(run)
 
@@ -279,7 +292,11 @@ class MarketWarmupService:
             discovery_jobs_enqueued = 0
             if force_discovery or visible_count < MARKET_WARM_TARGET:
                 for scan_plan in _scan_planner().warmup_discovery_scans():
-                    await self._enqueue_scan_plan(market, scan_plan)
+                    await self._enqueue_scan_plan(
+                        market,
+                        scan_plan,
+                        scheduler_run_id=scheduler_run_id,
+                    )
                     discovery_jobs_enqueued += 1
 
             visible_count = await self.refresh_market_inventory_state(market)
@@ -302,6 +319,7 @@ class MarketWarmupService:
         *,
         force_discovery: bool = False,
         ignore_cooldown: bool = False,
+        scheduler_run_id: str | None = None,
     ) -> bool:
         now = datetime.now(tz=UTC)
         lock_until = await self.state_store.scan_lock_until(market.key)
@@ -325,6 +343,7 @@ class MarketWarmupService:
                 "centerLongitude": market.center_longitude,
                 "forceDiscovery": force_discovery,
             },
+            scheduler_run_id=scheduler_run_id,
         )
         return True
 
@@ -338,6 +357,7 @@ class MarketWarmupService:
         source_url: str | None = None,
         source_data: Any = None,
         extra_payload: dict[str, Any] | None = None,
+        scheduler_run_id: str | None = None,
     ) -> JobRecord:
         payload: dict[str, Any] = {
             "marketKey": market.key,
@@ -358,12 +378,18 @@ class MarketWarmupService:
             payload["sourceData"] = source_data
         if extra_payload:
             payload.update(extra_payload)
-        return await JobQueueRepository(self.session).enqueue_job(JobType.MARKET_SCAN, payload)
+        return await JobQueueRepository(self.session).enqueue_job(
+            JobType.MARKET_SCAN,
+            payload,
+            scheduler_run_id=scheduler_run_id,
+        )
 
     async def _enqueue_scan_plan(
         self,
         market: MarketDescriptor,
         scan_plan: MarketScanPlan,
+        *,
+        scheduler_run_id: str | None = None,
     ) -> JobRecord:
         return await self._enqueue_market_scan_job(
             market,
@@ -373,6 +399,7 @@ class MarketWarmupService:
             source_url=scan_plan.source_url,
             source_data=scan_plan.source_data,
             extra_payload=scan_plan.extra_payload,
+            scheduler_run_id=scheduler_run_id,
         )
 
     async def _structured_source_rows(self, market_key: str) -> list[dict[str, Any]]:
@@ -450,7 +477,12 @@ class MarketWarmupService:
         await self._enqueue_scan_plan(market, _scan_planner().bootstrap_short_scan(market))
         return True
 
-    async def enqueue_weekly_scans(self, *, limit: int = 200) -> dict[str, int]:
+    async def enqueue_weekly_scans(
+        self,
+        *,
+        limit: int = 200,
+        scheduler_run_id: str | None = None,
+    ) -> dict[str, int]:
         """Fan out one MARKET_SCAN job per (active market × SCAN_WINDOWS).
 
         Credit budget per market comes from ``PAGE_BUDGET_BY_TIER[heat_tier]``.
@@ -461,7 +493,11 @@ class MarketWarmupService:
         enqueued = 0
         for market in markets:
             for scan_plan in _scan_planner().weekly_scans(market):
-                await self._enqueue_scan_plan(market, scan_plan)
+                await self._enqueue_scan_plan(
+                    market,
+                    scan_plan,
+                    scheduler_run_id=scheduler_run_id,
+                )
                 enqueued += 1
         return {"markets": len(markets), "jobs_enqueued": enqueued}
 

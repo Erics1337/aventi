@@ -25,6 +25,7 @@ def fake_job_queue(monkeypatch: pytest.MonkeyPatch) -> list[JobRecord]:
         *,
         run_at: datetime | None = None,
         max_attempts: int = 5,
+        scheduler_run_id: str | None = None,
     ) -> JobRecord:
         job = JobRecord(
             id=f"fake-job-{len(jobs) + 1}",
@@ -32,6 +33,7 @@ def fake_job_queue(monkeypatch: pytest.MonkeyPatch) -> list[JobRecord]:
             payload=payload or {},
             run_at=run_at or datetime.now(tz=UTC),
             max_attempts=max_attempts,
+            scheduler_run_id=scheduler_run_id,
         )
         jobs.append(job)
         return job

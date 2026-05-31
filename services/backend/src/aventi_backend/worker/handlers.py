@@ -293,6 +293,7 @@ async def _handle_market_scan(
             source_url=str(payload.get("sourceUrl")) if payload.get("sourceUrl") else None,
             source_data=payload.get("sourceData"),
             job_id=job.id,
+            scheduler_run_id=job.scheduler_run_id,
             feed_filters=filter_payload if isinstance(filter_payload, dict) else None,
             latitude=float(payload["latitude"]) if payload.get("latitude") is not None else None,
             longitude=float(payload["longitude"]) if payload.get("longitude") is not None else None,
@@ -352,6 +353,7 @@ async def _handle_market_warmup(
         market,
         job_id=job.id,
         force_discovery=_parse_bool(payload.get("forceDiscovery")),
+        scheduler_run_id=job.scheduler_run_id,
     )
     return {"jobId": job.id, "jobType": str(job.type), **result}
 

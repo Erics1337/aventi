@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from aventi_backend.core.logging import configure_logging
 from aventi_backend.core.settings import get_settings
 from aventi_backend.db.session import open_db_session
-from aventi_backend.services.jobs import JobRecord, JobType
+from aventi_backend.services.jobs import JobQueueRepository, JobRecord, JobType
 from aventi_backend.worker.handlers import process_job
 
 logger = structlog.get_logger(__name__)
@@ -22,6 +22,7 @@ configure_logging(get_settings().log_level)
 
 SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 JobProcessor = Callable[[JobRecord, AsyncSession], Awaitable[Any]]
+LedgerFactory = Callable[[AsyncSession], JobQueueRepository]
 
 
 def handler(event, context) -> dict:
@@ -42,6 +43,7 @@ async def _process_records(
     *,
     session_factory: SessionFactory = open_db_session,
     job_processor: JobProcessor = process_job,
+    ledger_factory: LedgerFactory = JobQueueRepository,
 ) -> dict:
     processed = 0
     failures = []
@@ -57,7 +59,8 @@ async def _process_records(
                 job_type = JobType(data.get("job_type"))
                 payload = data.get("payload", {})
                 attempts = int(record.get("attributes", {}).get("ApproximateReceiveCount", 1))
-                max_attempts = data.get("max_attempts", 5)
+                max_attempts = int(data.get("max_attempts", 5))
+                scheduler_run_id = data.get("scheduler_run_id")
 
                 job = JobRecord(
                     id=job_id,
@@ -66,8 +69,32 @@ async def _process_records(
                     run_at=datetime.now(tz=UTC),
                     attempts=attempts,
                     max_attempts=max_attempts,
-                    run_id=record.get("messageId")
+                    run_id=record.get("messageId"),
+                    scheduler_run_id=(
+                        scheduler_run_id if isinstance(scheduler_run_id, str) else None
+                    ),
                 )
+                ledger = ledger_factory(session)
+                await ledger.mark_processing(
+                    job,
+                    run_id=record.get("messageId"),
+                    sqs_message_id=record.get("messageId"),
+                )
+                if attempts > max_attempts:
+                    await ledger.mark_failed(
+                        job.id,
+                        error=f"maximum attempts exceeded ({attempts}/{max_attempts})",
+                        attempts=attempts,
+                        max_attempts=max_attempts,
+                    )
+                    logger.warning(
+                        "worker.lambda.dead_skipped",
+                        job_id=job.id,
+                        job_type=job.type.value,
+                        attempts=attempts,
+                        max_attempts=max_attempts,
+                    )
+                    continue
 
                 logger.info(
                     "worker.lambda.processing",
@@ -78,10 +105,29 @@ async def _process_records(
 
                 # Process the job
                 result = await job_processor(job, session)
+                await ledger.mark_succeeded(
+                    job.id,
+                    result=result if isinstance(result, dict) else {"result": result},
+                )
                 logger.info("worker.lambda.success", job_id=job.id, result=result)
                 processed += 1
 
             except Exception as exc: # noqa: BLE001
+                try:
+                    body = record.get("body", "{}")
+                    data = json.loads(body)
+                    job_id = data.get("job_id")
+                    attempts = int(record.get("attributes", {}).get("ApproximateReceiveCount", 1))
+                    max_attempts = int(data.get("max_attempts", 5))
+                    if isinstance(job_id, str) and job_id:
+                        await ledger_factory(session).mark_failed(
+                            job_id,
+                            error=str(exc),
+                            attempts=attempts,
+                            max_attempts=max_attempts,
+                        )
+                except Exception:  # noqa: BLE001
+                    pass
                 # If an explicit failure happens, we catch it per record.
                 # However, since Lambda integrates with SQS natively,
                 # if you are processing a batch of records, you should return

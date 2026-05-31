@@ -2,7 +2,10 @@ import type {
   AdminDashboardResponse,
   AdminEnqueueMarketScanPayload,
   AdminEnqueueMarketScanResponse,
+  AdminFeedDiagnosticResponse,
   AdminImportMarketsCatalogResponse,
+  AdminSmokeActionResponse,
+  AdminSystemResponse,
   AdminUserLocationsResponse,
   BootstrapMeResponse,
   DeleteFavoriteResponse,
@@ -262,6 +265,16 @@ export class AventiApiClient {
     return this.request<AdminDashboardResponse>(`/v1/admin/dashboard`);
   }
 
+  getAdminSystem() {
+    return this.request<AdminSystemResponse>(`/v1/admin/system`);
+  }
+
+  getAdminFeedDiagnostic(marketKey: string) {
+    return this.request<AdminFeedDiagnosticResponse>(
+      `/v1/admin/markets/${encodeURIComponent(marketKey)}/feed-diagnostic`,
+    );
+  }
+
   getAdminUserLocations() {
     return this.request<AdminUserLocationsResponse>(`/v1/admin/user-locations`);
   }
@@ -276,6 +289,33 @@ export class AventiApiClient {
     return this.request<AdminEnqueueMarketScanResponse>(`/v1/admin/markets/enqueue-scan`, {
       method: 'POST',
       body: payload,
+    });
+  }
+
+  postAdminSchedulerSmoke(limit = 1) {
+    return this.request<AdminSmokeActionResponse>(`/v1/admin/system/scheduler-runs/smoke`, {
+      method: 'POST',
+      body: { limit },
+    });
+  }
+
+  postAdminVerificationSmoke(limit = 5) {
+    return this.request<AdminSmokeActionResponse>(`/v1/admin/system/verification/smoke`, {
+      method: 'POST',
+      body: { limit },
+    });
+  }
+
+  postAdminImageSmoke() {
+    return this.request<AdminSmokeActionResponse>(`/v1/admin/system/images/smoke`, {
+      method: 'POST',
+    });
+  }
+
+  postAdminFeedSmoke(payload?: { marketKey?: string | null }) {
+    return this.request<AdminSmokeActionResponse>(`/v1/admin/system/feed/smoke`, {
+      method: 'POST',
+      body: payload ?? {},
     });
   }
 
@@ -302,7 +342,6 @@ export class AventiApiClient {
     });
   }
 }
-
 
 
 

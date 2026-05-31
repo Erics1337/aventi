@@ -8,12 +8,19 @@ from aventi_backend.services.jobs import JobRecord, JobType
 from aventi_backend.worker.handlers import JobDependencies, process_job
 
 
-def _job(job_id: str, job_type: JobType, payload: dict[str, Any]) -> JobRecord:
+def _job(
+    job_id: str,
+    job_type: JobType,
+    payload: dict[str, Any],
+    *,
+    scheduler_run_id: str | None = None,
+) -> JobRecord:
     return JobRecord(
         id=job_id,
         type=job_type,
         payload=payload,
         run_at=datetime.now(tz=UTC),
+        scheduler_run_id=scheduler_run_id,
     )
 
 
@@ -140,10 +147,16 @@ async def test_generate_image_storage_failure_is_typed_runtime_error_without_net
 @pytest.mark.asyncio
 async def test_market_scan_uses_injected_executor_without_network() -> None:
     async def execute_scan(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        assert kwargs["scheduler_run_id"] == "11111111-1111-1111-1111-111111111111"
         return {"skipped": False, "ingest": {"discovered": 1}}
 
     result = await process_job(
-        _job("job-4", JobType.MARKET_SCAN, {"city": "Denver", "angle": "events"}),
+        _job(
+            "job-4",
+            JobType.MARKET_SCAN,
+            {"city": "Denver", "angle": "events"},
+            scheduler_run_id="11111111-1111-1111-1111-111111111111",
+        ),
         FakeSession(),  # type: ignore[arg-type]
         dependencies=JobDependencies(market_scan_executor=execute_scan),
     )
