@@ -41,13 +41,13 @@ export function getVisitorStorePlatform(): VisitorStorePlatform {
  */
 export function resolveGetAppHref(): string {
   const platform = getVisitorStorePlatform();
-  if (platform === 'ios') return getIosAppStoreUrl() ?? '/profile';
+  if (platform === 'ios') return getIosAppStoreUrl() ?? '/download';
   if (platform === 'android') return getPlayStoreUrl();
-  return '/profile';
+  return '/download';
 }
 
 export function useGetAppStoreHref(): string {
-  const [href, setHref] = useState('/profile');
+  const [href, setHref] = useState('/download');
 
   useEffect(() => {
     setHref(resolveGetAppHref());

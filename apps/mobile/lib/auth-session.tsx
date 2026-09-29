@@ -1,4 +1,5 @@
 import type { Session } from '@supabase/supabase-js';
+import * as Linking from 'expo-linking';
 import { createContext, startTransition, useContext, useEffect, useMemo, useState } from 'react';
 import type { PropsWithChildren } from 'react';
 import { supabase } from './supabase';
@@ -36,12 +37,20 @@ interface AuthSessionContextValue {
   requireFullAccount: (reason: Extract<AuthPromptReason, 'premium' | 'premium-purchase' | 'premium-restore'>) => boolean;
   signInWithPassword: (email: string, password: string, captchaToken?: string) => Promise<void>;
   signUpWithPassword: (email: string, password: string, captchaToken?: string) => Promise<SignUpResult>;
+  passwordRecoveryPending: boolean;
+  requestPasswordRecovery: (email: string) => Promise<void>;
+  updateRecoveredPassword: (password: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
 const AuthSessionContext = createContext<AuthSessionContextValue | null>(null);
 const captchaSiteKey = process.env.EXPO_PUBLIC_HCAPTCHA_SITE_KEY;
 let reportGuestAuthFailure: ((error: unknown) => void) | null = null;
+
+function authRedirectUrl(): string {
+  const webUrl = process.env.EXPO_PUBLIC_WEB_URL?.replace(/\/$/, '');
+  return webUrl ? `${webUrl}/auth/callback` : Linking.createURL('auth/callback');
+}
 
 function isAnonymousSession(session: Session | null): boolean {
   if (!session) return false;
@@ -157,6 +166,7 @@ export function AuthSessionProvider({ children }: PropsWithChildren) {
   const [authPromptVisible, setAuthPromptVisible] = useState(false);
   const [authPromptReason, setAuthPromptReason] = useState<AuthPromptReason>('welcome');
   const [guestAuthError, setGuestAuthError] = useState<string | null>(null);
+  const [passwordRecoveryPending, setPasswordRecoveryPending] = useState(false);
   const isSupabaseConfigured = Boolean(supabase);
 
   useEffect(() => {
@@ -204,12 +214,17 @@ export function AuthSessionProvider({ children }: PropsWithChildren) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
       startTransition(() => {
         setSession(nextSession ?? null);
         if (nextSession) {
           setGuestAuthError(null);
-          setAuthPromptVisible(false);
+          setAuthPromptVisible(event === 'PASSWORD_RECOVERY');
+        }
+        if (event === 'PASSWORD_RECOVERY') {
+          setPasswordRecoveryPending(true);
+          setAuthPromptReason('welcome');
+          setAuthPromptVisible(true);
         }
         setIsReady(true);
       });
@@ -220,6 +235,46 @@ export function AuthSessionProvider({ children }: PropsWithChildren) {
       reportGuestAuthFailure = null;
       subscription.unsubscribe();
     };
+  }, []);
+
+  useEffect(() => {
+    if (!supabase) return;
+    const authClient = supabase;
+    const handleAuthUrl = async (url: string) => {
+      try {
+        const parsed = new URL(url);
+        const fragment = new URLSearchParams(parsed.hash.replace(/^#/, ''));
+        const query = parsed.searchParams;
+        const code = query.get('code');
+        const accessToken = fragment.get('access_token') ?? query.get('access_token');
+        const refreshToken = fragment.get('refresh_token') ?? query.get('refresh_token');
+        const type = fragment.get('type') ?? query.get('type');
+        if (code) {
+          const { error } = await authClient.auth.exchangeCodeForSession(code);
+          if (error) throw error;
+        } else if (accessToken && refreshToken) {
+          const { error } = await authClient.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+          if (error) throw error;
+        } else {
+          return;
+        }
+        if (type === 'recovery') {
+          setPasswordRecoveryPending(true);
+          setAuthPromptReason('welcome');
+          setAuthPromptVisible(true);
+        }
+      } catch (error) {
+        setGuestAuthError(formatAuthError(error));
+        setAuthPromptVisible(true);
+      }
+    };
+    void Linking.getInitialURL().then((url) => {
+      if (url) void handleAuthUrl(url);
+    });
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      void handleAuthUrl(url);
+    });
+    return () => subscription.remove();
   }, []);
 
   useEffect(() => {
@@ -307,18 +362,25 @@ export function AuthSessionProvider({ children }: PropsWithChildren) {
         throw new Error('Supabase auth is not configured in this build.');
       }
       if (isAnonymousSession(session)) {
-        const { error } = await supabase.auth.updateUser({ email, password });
+        const { data, error } = await supabase.auth.updateUser(
+          { email, password },
+          { emailRedirectTo: authRedirectUrl() },
+        );
         if (error) {
           throw error;
         }
-        setGuestAuthError(null);
-        setAuthPromptVisible(false);
-        return { emailConfirmationRequired: false };
+        const emailConfirmationRequired = data.user.email?.toLowerCase() !== email.toLowerCase();
+        if (!emailConfirmationRequired) {
+          setGuestAuthError(null);
+          setAuthPromptVisible(false);
+        }
+        return { emailConfirmationRequired };
       }
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
+          emailRedirectTo: authRedirectUrl(),
           ...(captchaToken ? { captchaToken } : {}),
         },
       });
@@ -337,12 +399,28 @@ export function AuthSessionProvider({ children }: PropsWithChildren) {
       if (!supabase) return;
       const { error } = await supabase.auth.signOut();
       if (error) {
-        throw error;
+        await clearLocalSupabaseSession();
       }
       setSession(null);
       setGuestAuthError(null);
       setAuthPromptReason('welcome');
       setAuthPromptVisible(true);
+    };
+
+    const requestPasswordRecovery = async (email: string) => {
+      if (!supabase) throw new Error('Supabase auth is not configured in this build.');
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: authRedirectUrl(),
+      });
+      if (error) throw error;
+    };
+
+    const updateRecoveredPassword = async (password: string) => {
+      if (!supabase) throw new Error('Supabase auth is not configured in this build.');
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+      setPasswordRecoveryPending(false);
+      setAuthPromptVisible(false);
     };
 
     const anonymous = isAnonymousSession(session);
@@ -367,9 +445,12 @@ export function AuthSessionProvider({ children }: PropsWithChildren) {
       requireFullAccount,
       signInWithPassword,
       signUpWithPassword,
+      passwordRecoveryPending,
+      requestPasswordRecovery,
+      updateRecoveredPassword,
       signOut,
     };
-  }, [authPromptReason, authPromptVisible, guestAuthError, isReady, isSupabaseConfigured, session]);
+  }, [authPromptReason, authPromptVisible, guestAuthError, isReady, isSupabaseConfigured, passwordRecoveryPending, session]);
 
   return <AuthSessionContext.Provider value={value}>{children}</AuthSessionContext.Provider>;
 }

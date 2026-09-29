@@ -5,11 +5,12 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import uuid5, NAMESPACE_URL
+from uuid import NAMESPACE_URL, uuid5
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from aventi_backend.services.categories import normalize_category
 from aventi_backend.services.event_images import infer_image_source, should_generate_main_image
 
 
@@ -56,7 +57,9 @@ class ManualIngestService:
             raise ValueError("Manual ingest requires at least one event payload")
 
         source = await self._ensure_ingest_source(source_name)
-        ingest_run = await self._create_ingest_run(source_id=source["id"], city=city, discovered_count=len(events))
+        ingest_run = await self._create_ingest_run(
+            source_id=source["id"], city=city, discovered_count=len(events)
+        )
 
         inserted_events = 0
         updated_events = 0
@@ -93,9 +96,9 @@ class ManualIngestService:
 
                 if should_generate_image and event_id not in image_job_event_ids:
                     from aventi_backend.services.jobs import JobQueueRepository, JobType
+
                     await JobQueueRepository(self.session).enqueue_job(
-                        JobType.GENERATE_IMAGE,
-                        {"eventId": event_id}
+                        JobType.GENERATE_IMAGE, {"eventId": event_id}
                     )
                     image_jobs_enqueued += 1
                     image_job_event_ids.add(event_id)
@@ -255,7 +258,7 @@ class ManualIngestService:
 
         # Insert extra occurrences for recurring events
         extra_inserted = 0
-        for extra in (event.get("extraOccurrences") or []):
+        for extra in event.get("extraOccurrences") or []:
             if not isinstance(extra, dict):
                 continue
             extra_starts_at = self._coerce_datetime(extra.get("startsAt"))
@@ -629,21 +632,38 @@ class ManualIngestService:
         starts_at_raw = self._pick(raw, "startsAt", "starts_at", default=None)
         if not title or not booking_url:
             raise ValueError("Manual ingest event requires `title` and `bookingUrl`")
-        starts_at = self._coerce_datetime(starts_at_raw) if starts_at_raw else datetime.now(tz=UTC) + timedelta(hours=6)
+        starts_at = (
+            self._coerce_datetime(starts_at_raw)
+            if starts_at_raw
+            else datetime.now(tz=UTC) + timedelta(hours=6)
+        )
         ends_at = self._coerce_datetime(self._pick(raw, "endsAt", "ends_at", default=None))
 
-        venue_obj = raw.get("venue") if isinstance(raw.get("venue"), dict) else {}
-        venue_name = self._pick(raw, "venueName", default=None) or self._pick(venue_obj, "name", default=None)
+        raw_venue = raw.get("venue")
+        venue_obj: dict[str, Any] = dict(raw_venue) if isinstance(raw_venue, dict) else {}
+        venue_name = self._pick(raw, "venueName", default=None) or self._pick(
+            venue_obj, "name", default=None
+        )
         if not venue_name:
             venue_name = f"{default_city} Spotlight"
 
-        city = self._pick(raw, "city", default=None) or self._pick(venue_obj, "city", default=None) or default_city
-        country = self._pick(raw, "country", default=None) or self._pick(venue_obj, "country", default=None) or "US"
+        city = (
+            self._pick(raw, "city", default=None)
+            or self._pick(venue_obj, "city", default=None)
+            or default_city
+        )
+        country = (
+            self._pick(raw, "country", default=None)
+            or self._pick(venue_obj, "country", default=None)
+            or "US"
+        )
 
         return {
             "title": str(title),
             "description": self._pick(raw, "description", default=None),
-            "category": self._normalize_category(self._pick(raw, "category", default="experiences")),
+            "category": self._normalize_category(
+                self._pick(raw, "category", default="experiences")
+            ),
             "bookingUrl": str(booking_url),
             "imageUrl": self._pick(raw, "imageUrl", "image_url", default=None),
             "priceLabel": self._pick(raw, "priceLabel", "price_label", default=None),
@@ -652,12 +672,21 @@ class ManualIngestService:
             "endsAt": ends_at,
             "timezone": self._pick(raw, "timezone", default="UTC"),
             "venueName": str(venue_name),
-            "venueSlug": self._pick(raw, "venueSlug", default=None) or self._pick(venue_obj, "slug", default=None),
-            "venueAddress": self._pick(raw, "venueAddress", default=None) or self._pick(venue_obj, "address", default=None),
-            "venueLatitude": self._coerce_float(self._pick(raw, "venueLatitude", default=None) or self._pick(venue_obj, "latitude", default=None)),
-            "venueLongitude": self._coerce_float(self._pick(raw, "venueLongitude", default=None) or self._pick(venue_obj, "longitude", default=None)),
+            "venueSlug": self._pick(raw, "venueSlug", default=None)
+            or self._pick(venue_obj, "slug", default=None),
+            "venueAddress": self._pick(raw, "venueAddress", default=None)
+            or self._pick(venue_obj, "address", default=None),
+            "venueLatitude": self._coerce_float(
+                self._pick(raw, "venueLatitude", default=None)
+                or self._pick(venue_obj, "latitude", default=None)
+            ),
+            "venueLongitude": self._coerce_float(
+                self._pick(raw, "venueLongitude", default=None)
+                or self._pick(venue_obj, "longitude", default=None)
+            ),
             "city": str(city),
-            "state": self._pick(raw, "state", default=None) or self._pick(venue_obj, "state", default=None),
+            "state": self._pick(raw, "state", default=None)
+            or self._pick(venue_obj, "state", default=None),
             "country": str(country),
             "dressCode": self._pick(raw, "dressCode", "dress_code", default=None),
             "crowdAge": self._pick(raw, "crowdAge", "crowd_age", default=None),
@@ -666,9 +695,15 @@ class ManualIngestService:
             "vibes": self._coerce_list(self._pick(raw, "vibes", default=[])),
             "tags": self._coerce_list(self._pick(raw, "tags", default=[])),
             "metadata": raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {},
-            "venueMetadata": venue_obj.get("metadata") if isinstance(venue_obj.get("metadata"), dict) else {},
-            "venueRating": self._coerce_float(self._pick(raw, "venueRating", "venue_rating", default=None)),
-            "venueReviewCount": self._pick(raw, "venueReviewCount", "venue_review_count", default=None),
+            "venueMetadata": venue_obj.get("metadata")
+            if isinstance(venue_obj.get("metadata"), dict)
+            else {},
+            "venueRating": self._coerce_float(
+                self._pick(raw, "venueRating", "venue_rating", default=None)
+            ),
+            "venueReviewCount": self._pick(
+                raw, "venueReviewCount", "venue_review_count", default=None
+            ),
             "ticketOffers": raw.get("ticketOffers") or [],
             "extraOccurrences": raw.get("extraOccurrences") or [],
         }
@@ -725,17 +760,4 @@ class ManualIngestService:
 
     @staticmethod
     def _normalize_category(value: Any) -> str:
-        if value is None:
-            return "experiences"
-        normalized = str(value).strip().lower()
-        if normalized in {"nightlife", "dining", "concerts", "wellness", "experiences"}:
-            return normalized
-        if "music" in normalized or "concert" in normalized or "show" in normalized:
-            return "concerts"
-        if "food" in normalized or "drink" in normalized or "dining" in normalized:
-            return "dining"
-        if "well" in normalized or "fitness" in normalized or "yoga" in normalized:
-            return "wellness"
-        if "night" in normalized or "club" in normalized or "bar" in normalized:
-            return "nightlife"
-        return "experiences"
+        return normalize_category(value)

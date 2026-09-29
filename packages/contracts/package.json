@@ -7,8 +7,7 @@
   "types": "src/index.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json --emitDeclarationOnly",
-    "lint": "echo 'No lint configured for @aventi/contracts yet'",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "echo 'No tests for @aventi/contracts yet'"
+    "test": "tsc -p tsconfig.json --noEmit"
   }
 }

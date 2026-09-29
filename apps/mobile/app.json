@@ -17,7 +17,8 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Aventi uses your location to personalize local events and nightlife discovery."
         }
-      ]
+      ],
+      "./plugins/with-purchase-launch-mode.cjs"
     ],
     "experiments": {
       "typedRoutes": true

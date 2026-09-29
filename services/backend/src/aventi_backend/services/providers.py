@@ -4,11 +4,17 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 from xml.etree import ElementTree
 from zoneinfo import ZoneInfo
 
 import httpx
+
+from aventi_backend.services.categories import normalize_category
+from aventi_backend.services.safe_http import safe_fetch
+
+if TYPE_CHECKING:
+    from aventi_backend.services.budgets import BudgetManager
 
 
 @dataclass(slots=True)
@@ -99,10 +105,14 @@ class StructuredJsonFeedScraper:
         if payload is None:
             if not self.source_url:
                 raise ValueError("StructuredJsonFeedScraper requires `source_url` or `source_data`")
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                response = await client.get(self.source_url)
-                response.raise_for_status()
-                payload = response.json()
+            response = await safe_fetch(
+                self.source_url,
+                timeout_seconds=self.timeout_seconds,
+                max_bytes=2 * 1024 * 1024,
+                allowed_content_types=("application/json", "text/json", "text/plain"),
+            )
+            response.raise_for_status()
+            payload = response.json()
 
         raw_events = _extract_structured_events(payload)
         candidates: list[DiscoveryCandidate] = []
@@ -139,10 +149,19 @@ class RssFeedScraper:
         if xml_text is None:
             if not self.source_url:
                 raise ValueError("RssFeedScraper requires `source_url` or `rss_xml`")
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                response = await client.get(self.source_url)
-                response.raise_for_status()
-                xml_text = response.text
+            response = await safe_fetch(
+                self.source_url,
+                timeout_seconds=self.timeout_seconds,
+                max_bytes=2 * 1024 * 1024,
+                allowed_content_types=(
+                    "application/rss+xml",
+                    "application/xml",
+                    "text/xml",
+                    "text/plain",
+                ),
+            )
+            response.raise_for_status()
+            xml_text = response.text
 
         root = ElementTree.fromstring(xml_text)
         items = list(root.findall(".//item"))
@@ -183,20 +202,25 @@ class SerpApiEventScraper:
         source_name: str | None = None,
         source_data: Any = None,
         timeout_seconds: float = 20.0,
+        budget_manager: BudgetManager | None = None,
     ) -> None:
         self.source_name = source_name or "serpapi"
         self.source_data = source_data
         self.timeout_seconds = timeout_seconds
+        self.budget_manager = budget_manager
         # Populated by discover(); read by execute_market_scan to forward into ingest_runs.metadata.
         self.last_meta: dict[str, Any] = {}
 
     async def discover(self, city: str, angle: str) -> list[DiscoveryCandidate]:
-        from aventi_backend.core.settings import get_settings
         import time as _time
+
+        from aventi_backend.core.settings import get_settings
 
         api_key = get_settings().serpapi_api_key
         if not api_key:
             raise ValueError("SERPAPI_API_KEY is not configured")
+        if self.budget_manager is None:
+            raise RuntimeError("SerpAPI calls require a BudgetManager")
 
         # Parse optional dateWindow + pages hints from source_data. Both are
         # supplied by the cron scheduler; manual callers get the default
@@ -224,8 +248,15 @@ class SerpApiEventScraper:
         }
         # Server-side date filter (htichips). Best-effort; client-side filter below
         # enforces the real window because htichips only supports today/week/weekend/month.
-        if date_window:
+        if date_window and not date_window.get("startDate") and not date_window.get("endDate"):
             duration = int(date_window.get("durationDays") or 0)
+            if date_window.get("startDate") and date_window.get("endDate"):
+                try:
+                    start = datetime.fromisoformat(str(date_window["startDate"])[:10])
+                    end = datetime.fromisoformat(str(date_window["endDate"])[:10])
+                    duration = max(1, (end - start).days + 1)
+                except ValueError:
+                    duration = 0
             if duration <= 1:
                 base_params["htichips"] = "date:today"
             elif duration <= 3:
@@ -242,11 +273,16 @@ class SerpApiEventScraper:
 
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             for page_idx in range(pages_planned):
+                await self.budget_manager.reserve(
+                    "serpapi", operation=f"events:{city}:{page_idx + 1}"
+                )
                 params = dict(base_params)
                 if page_idx > 0:
                     params["start"] = str(page_idx * 10)
 
-                print(f"[SERPAPI] discover query={query!r} page={page_idx} start={params.get('start', 0)}")
+                print(
+                    f"[SERPAPI] discover query={query!r} page={page_idx} start={params.get('start', 0)}"
+                )
                 _page_start = _time.monotonic()
                 response = await client.get(url, params=params)
                 response.raise_for_status()
@@ -335,10 +371,12 @@ class SerpApiEventScraper:
                             date_block.get("when"), date_block.get("start_date")
                         )
                         if occ_start is not None:
-                            occurrences.append(EventOccurrence(
-                                starts_at=occ_start,
-                                ends_at=occ_end,
-                            ))
+                            occurrences.append(
+                                EventOccurrence(
+                                    starts_at=occ_start,
+                                    ends_at=occ_end,
+                                )
+                            )
 
             description = raw.get("description")
             ticket_info_raw = raw.get("ticket_info") or []
@@ -348,6 +386,14 @@ class SerpApiEventScraper:
 
             # Issue 5: timezone inference from city
             tz_name = _city_timezone(city)
+            starts_at = _local_datetime_to_utc(starts_at, tz_name)
+            ends_at = _local_datetime_to_utc(ends_at, tz_name)
+            for occurrence in occurrences:
+                normalized_occurrence_start = _local_datetime_to_utc(occurrence.starts_at, tz_name)
+                assert normalized_occurrence_start is not None
+                occurrence.starts_at = normalized_occurrence_start
+                occurrence.ends_at = _local_datetime_to_utc(occurrence.ends_at, tz_name)
+                occurrence.timezone = tz_name
 
             # Issue 6 / improved price: prefer structured ticket price, fall back to text
             price_label, is_free = _extract_price_from_ticket_offers(ticket_offers)
@@ -362,7 +408,11 @@ class SerpApiEventScraper:
                     booking_url = best_ticket.url
 
             # Add vibe from search angle
-            vibes = [angle.lower()] if angle.lower() in ["chill", "energetic", "romantic", "intellectual"] else []
+            vibes = (
+                [angle.lower()]
+                if angle.lower() in ["chill", "energetic", "romantic", "intellectual"]
+                else []
+            )
 
             # Classify category
             category = _classify_category_from_angle(angle, title, description)
@@ -434,40 +484,59 @@ def _filter_by_date_window(
     few days outside the requested bucket. The scheduler supplies explicit
     integer day offsets; anything outside is discarded.
     """
-    now = datetime.now(tz=UTC)
-    start_days = int(window.get("startDays") or 0)
-    duration_days = int(window.get("durationDays") or 0)
-    if duration_days <= 0:
-        return candidates
-    window_start = now + timedelta(days=start_days)
-    window_end = window_start + timedelta(days=duration_days)
+    if window.get("startDate") and window.get("endDate"):
+        try:
+            window_start = datetime.fromisoformat(str(window["startDate"])[:10]).replace(tzinfo=UTC)
+            window_end = datetime.fromisoformat(str(window["endDate"])[:10]).replace(
+                tzinfo=UTC
+            ) + timedelta(days=1)
+        except ValueError:
+            return candidates
+    else:
+        now = datetime.now(tz=UTC)
+        start_days = int(window.get("startDays") or 0)
+        duration_days = int(window.get("durationDays") or 0)
+        if duration_days <= 0:
+            return candidates
+        window_start = now + timedelta(days=start_days)
+        window_end = window_start + timedelta(days=duration_days)
     filtered: list[DiscoveryCandidate] = []
     for candidate in candidates:
         starts_at = candidate.starts_at
         if starts_at is None:
-            # No parsed start date yet — keep it; downstream normalization
-            # will assign a default. We don't want to over-filter when
-            # SerpAPI's `when` parser missed a date format.
-            filtered.append(candidate)
+            # A missing date is unknown, never a synthetic upcoming event.
             continue
         # Normalize starts_at to UTC for comparison
         if starts_at.tzinfo is None:
             # Naive datetime: treat as local time in candidate's timezone or UTC
             tz_name = candidate.timezone or "UTC"
             try:
-                tz = ZoneInfo(tz_name)
+                tz: Any = ZoneInfo(tz_name)
             except Exception:
                 tz = UTC
             starts_at = starts_at.replace(tzinfo=tz).astimezone(UTC)
         elif starts_at.tzinfo != UTC:
             # Timezone-aware but not UTC: convert to UTC
             starts_at = starts_at.astimezone(UTC)
-        if window_start <= starts_at < window_end:
+        if window.get("startDate") and window.get("endDate"):
+            try:
+                local_date = starts_at.astimezone(ZoneInfo(candidate.timezone or "UTC")).date()
+                if (
+                    str(window["startDate"])[:10]
+                    <= local_date.isoformat()
+                    <= str(window["endDate"])[:10]
+                ):
+                    filtered.append(candidate)
+            except (ValueError, KeyError):
+                continue
+        elif window_start <= starts_at < window_end:
             filtered.append(candidate)
     return filtered
 
 
-def build_market_scan_scraper(payload: dict[str, Any]) -> SearchGroundedScraper:
+def build_market_scan_scraper(
+    payload: dict[str, Any], *, budget_manager: BudgetManager | None = None
+) -> SearchGroundedScraper:
     source_type = str(payload.get("sourceType") or "mock").strip().lower()
     source_name = str(payload.get("sourceName") or source_type or "market-scan")
     source_url = payload.get("sourceUrl")
@@ -487,9 +556,16 @@ def build_market_scan_scraper(payload: dict[str, Any]) -> SearchGroundedScraper:
         )
     if source_type in {"gemini", "ai"}:
         from aventi_backend.services.gemini import GeminiEventScraper
-        return GeminiEventScraper(source_name=source_name)
+
+        return GeminiEventScraper(source_name=source_name, budget_manager=budget_manager)
     if source_type in {"serpapi", "google-events"}:
-        return SerpApiEventScraper(source_name=source_name, source_data=source_data)
+        return SerpApiEventScraper(
+            source_name=source_name, source_data=source_data, budget_manager=budget_manager
+        )
+    from aventi_backend.core.settings import get_settings
+
+    if get_settings().env not in {"development", "test"}:
+        raise ValueError("A real discovery provider is required outside development/test")
     return MockScraper()
 
 
@@ -534,13 +610,15 @@ def _candidate_from_json_event(
     city = _coerce_str(_pick(raw, "city"), default=default_city) or _coerce_str(
         _pick(venue_obj, "city"), default=default_city
     )
+    timezone_name = _coerce_str(_pick(raw, "timezone")) or _city_timezone(city or default_city)
 
     vibes = _coerce_str_list(_pick(raw, "vibes", default=[]))
     tags = _coerce_str_list(_pick(raw, "tags", default=[]))
     if not tags:
         tags = [angle.replace(" ", "-")]
 
-    metadata = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
+    raw_metadata = raw.get("metadata")
+    metadata: dict[str, Any] = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
     metadata = {
         **metadata,
         "sourceType": "json",
@@ -561,8 +639,15 @@ def _candidate_from_json_event(
         or _coerce_float(_pick(venue_obj, "latitude")),
         venue_longitude=_coerce_float(_pick(raw, "venueLongitude"))
         or _coerce_float(_pick(venue_obj, "longitude")),
-        starts_at=_parse_datetime(_pick(raw, "startsAt", "starts_at", "startTime", "start_time")),
-        ends_at=_parse_datetime(_pick(raw, "endsAt", "ends_at", "endTime", "end_time")),
+        timezone=timezone_name,
+        starts_at=_parse_datetime(
+            _pick(raw, "startsAt", "starts_at", "startTime", "start_time"),
+            default_timezone=timezone_name,
+        ),
+        ends_at=_parse_datetime(
+            _pick(raw, "endsAt", "ends_at", "endTime", "end_time"),
+            default_timezone=timezone_name,
+        ),
         image_url=_coerce_str(_pick(raw, "imageUrl", "image_url")),
         price_label=_coerce_str(_pick(raw, "priceLabel", "price_label")),
         is_free=_coerce_bool(_pick(raw, "isFree", "is_free")),
@@ -639,6 +724,10 @@ def _classify_category_from_angle(angle: str, title: str | None, description: st
     angle_lower = angle.lower()
     text = f"{title or ''} {description or ''}".lower()
 
+    normalized = normalize_category(text)
+    if normalized in {"comedy", "markets", "sports", "outdoors", "tech"}:
+        return normalized
+
     # Prefer content-based classification so angle hints do not override what the event actually is.
     if any(
         word in text
@@ -713,6 +802,11 @@ def _build_serpapi_query(city: str, angle: str, source_data: Any) -> str:
         if isinstance(explicit_query, str) and explicit_query.strip():
             return explicit_query.strip()
 
+        window = source_data.get("dateWindow") or {}
+        if isinstance(window, dict) and window.get("startDate") and window.get("endDate"):
+            return (
+                f"{angle} events in {city} from {window['startDate']} through {window['endDate']}"
+            )
         filters = source_data.get("filters") or {}
         if isinstance(filters, dict):
             parts: list[str] = []
@@ -720,7 +814,9 @@ def _build_serpapi_query(city: str, angle: str, source_data: Any) -> str:
             time_of_day = str(filters.get("timeOfDay") or "").strip().lower()
             date = str(filters.get("date") or "").strip().lower()
             radius = filters.get("radiusMiles")
-            vibes = [str(value).strip() for value in (filters.get("vibes") or []) if str(value).strip()]
+            vibes = [
+                str(value).strip() for value in (filters.get("vibes") or []) if str(value).strip()
+            ]
             categories = [
                 _category_query_label(str(value).strip().lower())
                 for value in (filters.get("categories") or [])
@@ -771,10 +867,10 @@ def _extract_lat_lon_from_maps_url(url: str) -> tuple[float | None, float | None
       https://maps.google.com/?ll=37.7749,-122.4194
     """
     patterns = [
-        r'[?&]q=(-?\d+\.?\d*),(-?\d+\.?\d*)',
-        r'[?&]query=(-?\d+\.?\d*),(-?\d+\.?\d*)',
-        r'[?&]ll=(-?\d+\.?\d*),(-?\d+\.?\d*)',
-        r'@(-?\d+\.?\d*),(-?\d+\.?\d*)',
+        r"[?&]q=(-?\d+\.?\d*),(-?\d+\.?\d*)",
+        r"[?&]query=(-?\d+\.?\d*),(-?\d+\.?\d*)",
+        r"[?&]ll=(-?\d+\.?\d*),(-?\d+\.?\d*)",
+        r"@(-?\d+\.?\d*),(-?\d+\.?\d*)",
     ]
     for pattern in patterns:
         m = re.search(pattern, url)
@@ -809,7 +905,9 @@ def _normalise_ticket_info(ticket_info_raw: list[Any]) -> list[TicketOffer]:
             else:
                 price_label = price_str
                 is_free = False
-        offers.append(TicketOffer(url=url, provider=provider, price_label=price_label, is_free=is_free))
+        offers.append(
+            TicketOffer(url=url, provider=provider, price_label=price_label, is_free=is_free)
+        )
     return offers
 
 
@@ -881,7 +979,9 @@ def _city_timezone(city: str) -> str:
     return best_tz
 
 
-def _extract_price_from_description(description: str | None, title: str | None) -> tuple[str | None, bool | None]:
+def _extract_price_from_description(
+    description: str | None, title: str | None
+) -> tuple[str | None, bool | None]:
     """Extract price information from description and title."""
     if not description and not title:
         return None, None
@@ -895,21 +995,21 @@ def _extract_price_from_description(description: str | None, title: str | None) 
 
     # Extract price patterns
     price_patterns = [
-        r'\$(\d+)',  # $25
-        r'(\d+)\s*dollars?',  # 25 dollars
-        r'donation\s*\$?(\d+)',  # donation $25
-        r'suggested\s*donation\s*\$?(\d+)',  # suggested donation $25
-        r'\$\$\$',  # $$$
-        r'\$\$',   # $$
+        r"\$(\d+)",  # $25
+        r"(\d+)\s*dollars?",  # 25 dollars
+        r"donation\s*\$?(\d+)",  # donation $25
+        r"suggested\s*donation\s*\$?(\d+)",  # suggested donation $25
+        r"\$\$\$",  # $$$
+        r"\$\$",  # $$
     ]
 
     for pattern in price_patterns:
         match = re.search(pattern, text)
         if match:
             price = match.group(1) if match.lastindex else match.group(0)
-            if price == '$$$':
+            if price == "$$$":
                 return "$$$", False
-            elif price == '$$':
+            elif price == "$$":
                 return "$$", False
             else:
                 return f"${price}", False
@@ -928,17 +1028,18 @@ def _parse_serpapi_when_range(
     Returns (starts_at, ends_at); ends_at is None when only start found.
     """
     now = datetime.now(tz=UTC)
+    now_naive = now.replace(tzinfo=None)
     current_year = now.year
 
     def _parse_segment(seg: str) -> datetime | None:
-        seg = re.sub(r'^\w+,\s*', '', seg.strip()).strip()
+        seg = re.sub(r"^\w+,\s*", "", seg.strip()).strip()
         for fmt in ("%d %b, %I:%M %p", "%d %b, %I %p", "%d %b", "%I:%M %p", "%I %p"):
             try:
                 dt = datetime.strptime(seg, fmt)
                 dt = dt.replace(year=current_year)
                 # Keep datetime naive (local time) - filtering code will normalize to UTC
                 # using the candidate's timezone
-                if dt < now - timedelta(days=1):
+                if dt < now_naive - timedelta(days=1):
                     dt = dt.replace(year=current_year + 1)
                 return dt
             except ValueError:
@@ -978,7 +1079,7 @@ def _parse_serpapi_when_range(
                 dt = datetime.strptime(start_date_str.strip(), fmt)
                 dt = dt.replace(year=current_year)
                 # Keep datetime naive (local time) - filtering code will normalize
-                if dt < now:
+                if dt < now_naive:
                     dt = dt.replace(year=current_year + 1)
                 return dt, None
             except ValueError:
@@ -987,18 +1088,39 @@ def _parse_serpapi_when_range(
     return None, None
 
 
-def _parse_datetime(value: Any) -> datetime | None:
+def _local_datetime_to_utc(value: datetime | None, timezone_name: str) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is not None:
+        return value.astimezone(UTC)
+    timezone: Any
+    try:
+        timezone = ZoneInfo(timezone_name)
+    except (KeyError, ValueError):
+        timezone = UTC
+    return value.replace(tzinfo=timezone).astimezone(UTC)
+
+
+def _parse_datetime(value: Any, *, default_timezone: str | None = None) -> datetime | None:
+    try:
+        timezone = ZoneInfo(default_timezone) if default_timezone else UTC
+    except (KeyError, ValueError):
+        timezone = UTC
     if value is None or value == "":
         return None
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=UTC)
+        if value.tzinfo:
+            return value.astimezone(UTC)
+        return value.replace(tzinfo=timezone).astimezone(UTC)
     if isinstance(value, str):
         raw = value.strip()
         if not raw:
             return None
         try:
             dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-            return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+            if dt.tzinfo:
+                return dt.astimezone(UTC)
+            return dt.replace(tzinfo=timezone).astimezone(UTC)
         except ValueError:
             try:
                 dt = parsedate_to_datetime(raw)

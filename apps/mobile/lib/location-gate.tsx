@@ -13,8 +13,12 @@ import {
 } from 'react';
 import { aventiApi } from './api';
 import { useAuthSession } from './auth-session';
+import { useQuery } from '@tanstack/react-query';
+import type { Destination } from '@aventi/contracts';
 
-const TRAVEL_MODE_STORAGE_KEY = 'aventi.travel.override.v1';
+const LEGACY_TRAVEL_MODE_STORAGE_KEY = 'aventi.travel.override.v1';
+const TRAVEL_MODE_STORAGE_PREFIX = 'aventi.travel.destination.v2';
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type LocationGateStatus = 'checking' | 'needs-permission' | 'denied' | 'ready' | 'error';
 
@@ -27,10 +31,7 @@ export interface LocationPoint {
   timezone?: string | null;
 }
 
-export interface TravelModeOverride extends LocationPoint {
-  id: string;
-  label: string;
-}
+export type TravelModeOverride = Destination;
 
 interface EffectiveLocation extends LocationPoint {
   source: 'device' | 'travel';
@@ -49,57 +50,24 @@ interface LocationGateContextValue {
   requestDeviceLocation: () => Promise<void>;
   recheckPermissionAndLocation: () => Promise<void>;
   setTravelModeOverride: (override: TravelModeOverride | null) => Promise<void>;
-  setTravelModeCoordinates: (coordinates: {
-    latitude: number;
-    longitude: number;
-    label?: string;
-  }) => Promise<void>;
 }
 
 const LocationGateContext = createContext<LocationGateContextValue | null>(null);
 
-export const TRAVEL_MODE_PRESETS: readonly TravelModeOverride[] = [
-  {
-    id: 'nyc',
-    label: 'New York City',
-    city: 'New York',
-    state: 'NY',
-    country: 'US',
-    timezone: 'America/New_York',
-    latitude: 40.7128,
-    longitude: -74.006,
-  },
-  {
-    id: 'miami',
-    label: 'Miami',
-    city: 'Miami',
-    state: 'FL',
-    country: 'US',
-    timezone: 'America/New_York',
-    latitude: 25.7617,
-    longitude: -80.1918,
-  },
-  {
-    id: 'la',
-    label: 'Los Angeles',
-    city: 'Los Angeles',
-    state: 'CA',
-    country: 'US',
-    timezone: 'America/Los_Angeles',
-    latitude: 34.0522,
-    longitude: -118.2437,
-  },
-  {
-    id: 'toronto',
-    label: 'Toronto',
-    city: 'Toronto',
-    state: 'ON',
-    country: 'CA',
-    timezone: 'America/Toronto',
-    latitude: 43.651070,
-    longitude: -79.347015,
-  },
-] as const;
+function travelModeStorageKey(accountId: string): string {
+  return `${TRAVEL_MODE_STORAGE_PREFIX}:${accountId}`;
+}
+
+function isCanonicalDestination(value: Partial<Destination>): value is Destination {
+  return typeof value.id === 'string' && UUID_PATTERN.test(value.id)
+    && typeof value.label === 'string' && value.label.length > 0
+    && typeof value.city === 'string' && value.city.length > 0
+    && typeof value.state === 'string' && value.state.length > 0
+    && value.country === 'US'
+    && typeof value.latitude === 'number' && Number.isFinite(value.latitude)
+    && typeof value.longitude === 'number' && Number.isFinite(value.longitude)
+    && (value.timezone === undefined || value.timezone === null || typeof value.timezone === 'string');
+}
 
 function resolveLocalTimezone(): string | null {
   try {
@@ -144,36 +112,21 @@ async function buildLocationPoint(latitude: number, longitude: number): Promise<
   };
 }
 
-function formatCoordinateLabel(latitude: number, longitude: number): string {
-  return `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
-}
-
-async function buildTravelModeOverride(
-  latitude: number,
-  longitude: number,
-  label?: string,
-): Promise<TravelModeOverride> {
-  const geocode = await reverseGeocodeLocation(latitude, longitude);
-  const geocodeLabel = [geocode.city, geocode.state].filter(Boolean).join(', ');
-  const nextLabel = label?.trim() || geocodeLabel || formatCoordinateLabel(latitude, longitude);
-
-  return {
-    id: `custom:${latitude.toFixed(4)},${longitude.toFixed(4)}`,
-    label: nextLabel,
-    latitude,
-    longitude,
-    city: geocode.city,
-    state: geocode.state,
-    country: geocode.country,
-    timezone: null,
-  };
-}
-
 export function LocationGateProvider({ children }: PropsWithChildren) {
   const auth = useAuthSession();
+  const accountId = auth.isFullAccount ? auth.session?.user.id ?? null : null;
+  const travelEntitlementsQuery = useQuery({
+    queryKey: ['membership', 'entitlements', auth.session?.user.id ?? 'no-session'],
+    enabled: auth.isFullAccount,
+    queryFn: () => aventiApi.getEntitlements(),
+    staleTime: 60_000,
+  });
+  const canUseTravelMode = travelEntitlementsQuery.data?.travelMode === true;
+  const travelAccessReady = !auth.isFullAccount || travelEntitlementsQuery.isSuccess || travelEntitlementsQuery.isError;
   const [status, setStatus] = useState<LocationGateStatus>('checking');
   const [deviceLocation, setDeviceLocation] = useState<LocationPoint | null>(null);
-  const [travelModeOverride, setTravelModeOverrideState] = useState<TravelModeOverride | null>(null);
+  const [travelSelection, setTravelSelection] = useState<{ accountId: string; destination: TravelModeOverride } | null>(null);
+  const travelModeOverride = travelSelection?.accountId === accountId ? travelSelection.destination : null;
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [profileSyncError, setProfileSyncError] = useState<string | null>(null);
   const lastSyncedSignature = useRef<string | null>(null);
@@ -188,13 +141,15 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
       setProfileSyncError(null);
       return;
     }
+    const timezone = location.timezone ?? resolveLocalTimezone();
     const signature = JSON.stringify({
+      accountId: auth.session?.user.id ?? null,
       latitude: Number(location.latitude.toFixed(4)),
       longitude: Number(location.longitude.toFixed(4)),
       city: location.city ?? null,
       state: location.state ?? null,
       country: location.country ?? null,
-      timezone: location.timezone ?? null,
+      timezone,
     });
     if (signature !== lastSyncedSignature.current) {
       try {
@@ -204,7 +159,7 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
           city: location.city ?? null,
           state: location.state ?? null,
           country: location.country ?? null,
-          timezone: location.timezone ?? null,
+          timezone,
         });
         lastSyncedSignature.current = signature;
         setProfileSyncError(null);
@@ -379,8 +334,14 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
   };
 
   const setTravelModeOverride = async (override: TravelModeOverride | null) => {
+    if (override && !canUseTravelMode) {
+      throw new Error('Aventi Unlimited is required for Travel Mode.');
+    }
+    if (override && (!accountId || !isCanonicalDestination(override))) {
+      throw new Error('Choose a supported destination from Aventi search.');
+    }
     startTransition(() => {
-      setTravelModeOverrideState(override);
+      setTravelSelection(override && accountId ? { accountId, destination: override } : null);
       if (override || !deviceLocation) {
         setErrorMessage(null);
       }
@@ -390,10 +351,10 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
     });
 
     try {
-      if (override) {
-        await AsyncStorage.setItem(TRAVEL_MODE_STORAGE_KEY, JSON.stringify(override));
-      } else {
-        await AsyncStorage.removeItem(TRAVEL_MODE_STORAGE_KEY);
+      if (override && accountId) {
+        await AsyncStorage.setItem(travelModeStorageKey(accountId), JSON.stringify(override));
+      } else if (accountId) {
+        await AsyncStorage.removeItem(travelModeStorageKey(accountId));
       }
     } catch {
       // Ignore storage failures; override still works for the current session.
@@ -404,49 +365,48 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
     }
   };
 
-  const setTravelModeCoordinates = async ({
-    latitude,
-    longitude,
-    label,
-  }: {
-    latitude: number;
-    longitude: number;
-    label?: string;
-  }) => {
-    const override = await buildTravelModeOverride(latitude, longitude, label);
-    await setTravelModeOverride(override);
-  };
-
   useEffect(() => {
+    if (!travelAccessReady) return;
     let active = true;
 
     void (async () => {
       let restoredOverride: TravelModeOverride | null = null;
 
       try {
-        const stored = await AsyncStorage.getItem(TRAVEL_MODE_STORAGE_KEY);
-        if (!active || !stored) {
-          await checkPermissionAndLocation();
+        await AsyncStorage.removeItem(LEGACY_TRAVEL_MODE_STORAGE_KEY);
+        if (!accountId) {
+          setTravelSelection(null);
+          await checkPermissionAndLocation({ travelOverrideForEvaluation: null });
+          return;
+        }
+        const scopedKey = travelModeStorageKey(accountId);
+        const stored = await AsyncStorage.getItem(scopedKey);
+        if (!active) {
+          return;
+        }
+        if (!stored) {
+          setTravelSelection(null);
+          await checkPermissionAndLocation({ travelOverrideForEvaluation: null });
+          return;
+        }
+        if (travelEntitlementsQuery.isError) {
+          setTravelSelection(null);
+          await checkPermissionAndLocation({ travelOverrideForEvaluation: null });
+          return;
+        }
+        if (!canUseTravelMode) {
+          await AsyncStorage.removeItem(scopedKey);
+          setTravelSelection(null);
+          await checkPermissionAndLocation({ travelOverrideForEvaluation: null });
           return;
         }
         const parsed = JSON.parse(stored) as Partial<TravelModeOverride>;
-        if (
-          typeof parsed.id === 'string' &&
-          typeof parsed.label === 'string' &&
-          typeof parsed.latitude === 'number' &&
-          typeof parsed.longitude === 'number'
-        ) {
-          restoredOverride = {
-            id: parsed.id,
-            label: parsed.label,
-            latitude: parsed.latitude,
-            longitude: parsed.longitude,
-            city: typeof parsed.city === 'string' ? parsed.city : null,
-            state: typeof parsed.state === 'string' ? parsed.state : null,
-            country: typeof parsed.country === 'string' ? parsed.country : null,
-            timezone: typeof parsed.timezone === 'string' ? parsed.timezone : null,
-          };
-          setTravelModeOverrideState(restoredOverride);
+        if (isCanonicalDestination(parsed)) {
+          restoredOverride = parsed;
+          setTravelSelection({ accountId, destination: restoredOverride });
+        } else {
+          await AsyncStorage.removeItem(scopedKey);
+          setTravelSelection(null);
         }
       } catch {
         // Ignore invalid stored travel overrides.
@@ -460,7 +420,7 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [accountId, canUseTravelMode, travelAccessReady, travelEntitlementsQuery.isError, travelEntitlementsQuery.isSuccess]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
@@ -477,24 +437,18 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
   }, []);
 
   useEffect(() => {
-    const activeLocation = travelModeOverride ?? deviceLocation;
-    if (!activeLocation) return;
-    void persistProfileLocation(activeLocation);
+    if (!deviceLocation) return;
+    void persistProfileLocation(deviceLocation);
   }, [
     auth.isAuthenticated,
     auth.isReady,
+    auth.session?.user.id,
     deviceLocation?.city,
     deviceLocation?.country,
     deviceLocation?.latitude,
     deviceLocation?.longitude,
     deviceLocation?.state,
     deviceLocation?.timezone,
-    travelModeOverride?.city,
-    travelModeOverride?.country,
-    travelModeOverride?.latitude,
-    travelModeOverride?.longitude,
-    travelModeOverride?.state,
-    travelModeOverride?.timezone,
   ]);
 
   const value = useMemo<LocationGateContextValue>(() => {
@@ -517,16 +471,15 @@ export function LocationGateProvider({ children }: PropsWithChildren) {
       deviceLocation,
       effectiveLocation,
       travelModeOverride,
-      canUseTravelMode: true,
+      canUseTravelMode,
       isTravelModeActive: Boolean(travelModeOverride),
       errorMessage,
       profileSyncError,
       requestDeviceLocation,
       recheckPermissionAndLocation,
       setTravelModeOverride,
-      setTravelModeCoordinates,
     };
-  }, [deviceLocation, errorMessage, profileSyncError, status, travelModeOverride]);
+  }, [canUseTravelMode, deviceLocation, errorMessage, profileSyncError, status, travelModeOverride]);
 
   return <LocationGateContext.Provider value={value}>{children}</LocationGateContext.Provider>;
 }

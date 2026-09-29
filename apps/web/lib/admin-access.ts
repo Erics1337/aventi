@@ -15,15 +15,14 @@ function rolesIncludeAdmin(value: unknown): boolean {
 
 /**
  * Matches backend `auth._claims_include_admin` / typical Supabase JWT shapes so UI and middleware
- * agree on who can see Admin Portal (app_metadata, user_metadata, boolean flags).
+ * agree on who can see Admin Portal using server-controlled app_metadata only.
  */
 export function isAdminUser(user: User | null | undefined): boolean {
   if (!user) return false;
   const app = user.app_metadata as Record<string, unknown> | undefined;
-  const usr = user.user_metadata as Record<string, unknown> | undefined;
 
-  if (app?.is_admin === true || usr?.is_admin === true) return true;
-  if (roleIsAdmin(app?.role) || roleIsAdmin(usr?.role)) return true;
-  if (rolesIncludeAdmin(app?.roles) || rolesIncludeAdmin(usr?.roles)) return true;
+  if (app?.is_admin === true) return true;
+  if (roleIsAdmin(app?.role)) return true;
+  if (rolesIncludeAdmin(app?.roles)) return true;
   return false;
 }

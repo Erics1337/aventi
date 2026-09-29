@@ -15,6 +15,8 @@ def apply_vibe_update(
     for vibe in vibes:
         current = next_weights.get(vibe, BASELINE_WEIGHT)
         next_weights[vibe] = (
-            current * LIKE_MULTIPLIER + LIKE_BONUS if action == "like" else current * PASS_MULTIPLIER
+            current * LIKE_MULTIPLIER + LIKE_BONUS
+            if action == "like"
+            else current * PASS_MULTIPLIER
         )
     return next_weights

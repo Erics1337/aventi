@@ -1,13 +1,16 @@
 """Supabase Storage service for uploading and managing event images."""
+
 from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+from urllib.parse import urlsplit
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from aventi_backend.core.settings import get_settings
+from aventi_backend.services.safe_http import safe_fetch
 
 
 class SupabaseStorageService:
@@ -46,23 +49,27 @@ class SupabaseStorageService:
             return None
 
         try:
-            # Pollinations can be slow to render a fresh image, so give it a
-            # couple of chances before letting the queue retry the job.
-            image_data: bytes | None = None
-            headers = {"Authorization": api_key} if api_key else {}
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                for attempt in range(2):
-                    try:
-                        response = await client.get(image_url, headers=headers)
-                        response.raise_for_status()
-                        image_data = response.content
-                        break
-                    except (httpx.HTTPError, httpx.TimeoutException):
-                        if attempt == 1:
-                            raise
-                        await asyncio.sleep(2)
-            if image_data is None:
-                raise RuntimeError("Pollinations image download returned no data")
+            if api_key and (
+                urlsplit(image_url).scheme != "https"
+                or urlsplit(image_url).netloc != "gen.pollinations.ai"
+            ):
+                raise ValueError("Provider credentials require the Pollinations HTTPS origin")
+            # One fetch per reservation. A job retry reserves again before calling.
+            headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+            async with asyncio.timeout(65):
+                response = await safe_fetch(
+                    image_url,
+                    headers=headers,
+                    timeout_seconds=60.0,
+                    max_bytes=12 * 1024 * 1024,
+                    allowed_content_types=("image/",),
+                    max_redirects=0,
+                )
+            response.raise_for_status()
+            image_data = response.content
+            if not image_data:
+                raise RuntimeError("Image download returned no data")
+            content_type = response.headers.get("content-type", content_type).split(";")[0]
 
             # Generate a unique filename
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -74,7 +81,8 @@ class SupabaseStorageService:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 upload_response = await client.post(
                     upload_url,
-                    headers=self._auth_headers(content_type=content_type) | {
+                    headers=self._auth_headers(content_type=content_type)
+                    | {
                         "x-upsert": "true",  # Overwrite if exists
                     },
                     content=image_data,
@@ -87,9 +95,9 @@ class SupabaseStorageService:
 
         except Exception as e:
             if isinstance(e, httpx.HTTPStatusError):
-                print(f"Failed to upload image to Supabase Storage: {e.response.text}")
+                print(f"Image upload failed: HTTP {e.response.status_code}")
             else:
-                print(f"Failed to upload image to Supabase Storage: {type(e).__name__}: {e!r}")
+                print(f"Image upload failed: {type(e).__name__}")
             return None
 
     async def ensure_bucket_exists(self) -> bool:
@@ -161,11 +169,13 @@ async def generate_and_store_event_image(
     # Generate image via Pollinations
     generator = PollinationsImageGenerator(api_key=settings.pollinations_api_key)
     prompt = (
-        f"A promotional poster for {event_title} in {event_city}, "
-        f"vibes: {', '.join(vibes or [])}"
+        f"A promotional poster for {event_title} in {event_city}, vibes: {', '.join(vibes or [])}"
     )
     pollinations_url = await generator.generate_event_image(prompt)
 
+    from aventi_backend.services.budgets import BudgetManager
+
+    await BudgetManager(session).reserve("pollinations", operation=f"event-image:{event_id}")
     # Upload to Supabase Storage
     storage = SupabaseStorageService()
     await storage.ensure_bucket_exists()
@@ -187,5 +197,5 @@ async def generate_and_store_event_image(
             await session.flush()
         return storage_url
 
-    # Fallback to Pollinations URL if storage upload fails
-    return pollinations_url
+    # Never expose a generation endpoint as a cached event image.
+    return None

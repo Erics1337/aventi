@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -8,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from aventi_backend.services.gemini import GeminiEventScraper
+from aventi_backend.services.ingest import ManualIngestService
 from aventi_backend.services.jobs import JobRecord, JobType
 from aventi_backend.services.market_inventory import (
     MarketWarmupService,
@@ -19,6 +21,13 @@ from aventi_backend.services.verification import VerificationService
 
 
 async def process_job(job: JobRecord, session: AsyncSession) -> dict[str, Any] | None:
+    if job.type == JobType.HEALTH_CHECK:
+        await session.execute(text("select 1"))
+        return {"ok": True}
+    if job.type == JobType.RETRY_ACCOUNT_DELETION:
+        return await _handle_account_deletion(job, session)
+    if job.type == JobType.RECONCILE_SUBSCRIPTION:
+        return await _handle_subscription_reconcile(job, session)
     if job.type == JobType.MARKET_WARMUP:
         return await _handle_market_warmup(job, session)
     if job.type == JobType.MARKET_SCAN:
@@ -29,7 +38,31 @@ async def process_job(job: JobRecord, session: AsyncSession) -> dict[str, Any] |
         return await _handle_enrich_event(job, session)
     if job.type == JobType.GENERATE_IMAGE:
         return await _handle_generate_image(job, session)
+    if job.type == JobType.GENERATE_INSIGHTS:
+        return await _handle_generate_insights(job, session)
     raise ValueError(f"Unsupported job type: {job.type}")
+
+
+async def _handle_account_deletion(job: JobRecord, session: AsyncSession) -> dict[str, Any]:
+    user_id = (job.payload or {}).get("userId")
+    if not isinstance(user_id, str):
+        raise ValueError("RETRY_ACCOUNT_DELETION payload requires string `userId`")
+    from aventi_backend.services.accounts import AccountDeletionService
+
+    result = await AccountDeletionService(session).request_deletion(user_id)
+    return {"userId": user_id, "result": result}
+
+
+async def _handle_subscription_reconcile(job: JobRecord, session: AsyncSession) -> dict[str, Any]:
+    user_id = (job.payload or {}).get("userId")
+    if not isinstance(user_id, str):
+        raise ValueError("RECONCILE_SUBSCRIPTION payload requires string `userId`")
+    from aventi_backend.services.billing import BillingService
+
+    result = await BillingService(session).reconcile(
+        authenticated_user_id=user_id, app_user_id=user_id
+    )
+    return {"userId": user_id, "result": result}
 
 
 async def _handle_generate_image(job: JobRecord, session: AsyncSession) -> dict[str, Any]:
@@ -37,6 +70,8 @@ async def _handle_generate_image(job: JobRecord, session: AsyncSession) -> dict[
     event_id = payload.get("eventId")
     if not isinstance(event_id, str):
         raise ValueError("GENERATE_IMAGE job payload requires string `eventId`")
+
+    from aventi_backend.services.budgets import BudgetManager
 
     result = await session.execute(
         text(
@@ -67,9 +102,9 @@ async def _handle_generate_image(job: JobRecord, session: AsyncSession) -> dict[
     if not event_row:
         return {"skipped": True, "reason": "event-not-found", "eventId": event_id}
 
+    from aventi_backend.core.settings import get_settings
     from aventi_backend.services.gemini import PollinationsImageGenerator
     from aventi_backend.services.storage import SupabaseStorageService
-    from aventi_backend.core.settings import get_settings
 
     settings = get_settings()
 
@@ -82,6 +117,7 @@ async def _handle_generate_image(job: JobRecord, session: AsyncSession) -> dict[
         "No readable text, no logos, atmospheric photography style, vertical composition."
     )
     pollinations_url = await generator.generate_event_image(prompt)
+    await BudgetManager(session).reserve("pollinations", operation=f"event-image:{event_id}")
 
     storage = SupabaseStorageService()
     await storage.ensure_bucket_exists()
@@ -93,6 +129,8 @@ async def _handle_generate_image(job: JobRecord, session: AsyncSession) -> dict[
 
     metadata_patch = {
         "imageSource": "supabase_storage",
+        "imageAiGenerated": True,
+        "imageProvider": "pollinations",
         "imageUpdatedAt": datetime.now(tz=UTC).isoformat(),
     }
 
@@ -118,16 +156,30 @@ async def _handle_generate_image(job: JobRecord, session: AsyncSession) -> dict[
         "source": "supabase_storage",
     }
 
+
 async def _handle_enrich_event(job: JobRecord, session: AsyncSession) -> dict[str, Any]:
     payload = job.payload or {}
     event_id = payload.get("eventId")
     if not isinstance(event_id, str):
         raise ValueError("ENRICH_EVENT job payload requires string `eventId`")
 
-    # Fetch event details
     result = await session.execute(
-        text("SELECT id, title, description, category, vibes, tags, metadata, city FROM events WHERE id = :id"),
-        {"id": event_id}
+        text(
+            """
+            select e.id, e.title, e.description, e.category, e.metadata, e.booking_url,
+                   coalesce(v.city, '') as city,
+                   coalesce(array_agg(et.tag order by et.tag)
+                     filter (where et.tag_type = 'vibe'), '{}'::text[]) as vibes,
+                   coalesce(array_agg(et.tag order by et.tag)
+                     filter (where et.tag_type = 'tag'), '{}'::text[]) as tags
+            from public.events e
+            left join public.venues v on v.id = e.venue_id
+            left join public.event_tags et on et.event_id = e.id
+            where e.id = :id
+            group by e.id, v.city
+            """
+        ),
+        {"id": event_id},
     )
     event_row = result.mappings().first()
     if not event_row:
@@ -137,68 +189,155 @@ async def _handle_enrich_event(job: JobRecord, session: AsyncSession) -> dict[st
     if not description or len(description.strip()) < 20:
         return {"skipped": True, "reason": "insufficient-description", "eventId": event_id}
 
+    # Enrichment facts must originate in the fetched source, not an earlier AI summary.
+    from aventi_backend.services.gemini import _document_text
+    from aventi_backend.services.safe_http import safe_fetch
+
+    try:
+        source = await safe_fetch(
+            str(event_row["booking_url"]),
+            max_bytes=512 * 1024,
+            timeout_seconds=10,
+            allowed_content_types=["text/html", "text/plain", "application/xhtml+xml"],
+        )
+        source.raise_for_status()
+        description = _document_text(source)
+    except Exception:
+        return {"skipped": True, "reason": "source-unavailable", "eventId": event_id}
+    if not description:
+        return {"skipped": True, "reason": "source-empty", "eventId": event_id}
+
     context = f"{event_row.get('title', '')} in {event_row.get('city', '')}"
 
-    # Run enrichment
-    enricher = GeminiEventScraper(source_name="enrichment-job")
+    from aventi_backend.services.budgets import BudgetManager
+
+    enricher = GeminiEventScraper(
+        source_name="enrichment-job", budget_manager=BudgetManager(session)
+    )
     metadata_updates = await enricher.enrich_event(description=description, context=context)
 
     if not metadata_updates:
-         return {"skipped": True, "reason": "no-metadata-extracted", "eventId": event_id}
+        return {"skipped": True, "reason": "no-metadata-extracted", "eventId": event_id}
 
-    # Prepare update payload
     update_data: dict[str, Any] = {}
-    if "category" in metadata_updates and not event_row.get("category"):
-         update_data["category"] = metadata_updates["category"]
+    category = metadata_updates.get("category")
+    if category and str(event_row.get("category") or "").lower() in {"", "experiences"}:
+        update_data["category"] = ManualIngestService._normalize_category(category)
 
-    existing_vibes = event_row.get("vibes") or []
-    new_vibes = metadata_updates.get("vibes") or []
-    merged_vibes = list(set(existing_vibes + new_vibes))[:5] # keep max 5
-    if merged_vibes != existing_vibes:
-        update_data["vibes"] = merged_vibes
-
-    existing_tags = event_row.get("tags") or []
-    new_tags = metadata_updates.get("tags") or []
-    merged_tags = list(set(existing_tags + new_tags))[:8] # keep max 8
-    if merged_tags != existing_tags:
-         update_data["tags"] = merged_tags
+    existing_vibes = _normalise_labels(event_row.get("vibes"), limit=5)
+    existing_tags = _normalise_labels(event_row.get("tags"), limit=8)
+    merged_vibes = _normalise_labels(
+        [*existing_vibes, *(metadata_updates.get("vibes") or [])], limit=5
+    )
+    merged_tags = _normalise_labels(
+        [*existing_tags, *(metadata_updates.get("tags") or [])], limit=8
+    )
 
     existing_metadata = event_row.get("metadata") or {}
     new_metadata = dict(existing_metadata)
 
-    for key in ["dressCode", "ageRestriction", "priceLabel"]:
-        if key in metadata_updates and metadata_updates[key]:
-             new_metadata[key] = metadata_updates[key]
+    for key in ["dressCode", "priceLabel"]:
+        if (
+            key in metadata_updates
+            and metadata_updates[key]
+            and str(metadata_updates[key]).casefold() in description.casefold()
+        ):
+            new_metadata[key] = metadata_updates[key]
 
-    if "isFree" in metadata_updates:
-         update_data["is_free"] = metadata_updates["isFree"]
+    admission = _normalise_admission(metadata_updates.get("ageRestriction"))
+    if admission and _description_supports_admission(description, admission):
+        update_data["admission_restriction"] = admission
+        update_data["admission_source_url"] = str(event_row["booking_url"])
+
+    if metadata_updates.get("isFree") is True and re.search(
+        r"\bfree (?:entry|admission|tickets)\b", description, re.IGNORECASE
+    ):
+        update_data["is_free"] = True
+    new_metadata["enrichmentProvenance"] = {
+        "sourceUrl": source.url,
+        "fetchedAt": datetime.now(tz=UTC).isoformat(),
+        "method": "source_document",
+    }
 
     new_metadata["enrichedAt"] = datetime.now(tz=UTC).isoformat()
-    update_data["metadata"] = new_metadata
+    update_data["metadata_json"] = json.dumps(new_metadata)
 
-    # Update database
-    set_clauses = ", ".join([f"{k} = :{k}" for k in update_data.keys()])
+    set_clauses = ", ".join(
+        "metadata = cast(:metadata_json as jsonb)" if key == "metadata_json" else f"{key} = :{key}"
+        for key in update_data
+    )
     if not set_clauses:
         return {"skipped": True, "reason": "no-updates-needed", "eventId": event_id}
 
     await session.execute(
-        text(f"UPDATE events SET {set_clauses} WHERE id = :id"),
-        {**update_data, "id": event_id}
+        text(f"UPDATE public.events SET {set_clauses}, updated_at = now() WHERE id = :id"),
+        {**update_data, "id": event_id},
     )
+    for label_type, labels in (("vibe", merged_vibes), ("tag", merged_tags)):
+        for label in labels:
+            await session.execute(
+                text(
+                    """
+                    insert into public.event_tags (event_id, tag, tag_type, score)
+                    values (:event_id, :tag, :tag_type, null)
+                    on conflict (event_id, tag, tag_type) do nothing
+                    """
+                ),
+                {"event_id": event_id, "tag": label, "tag_type": label_type},
+            )
     await session.commit()
 
     return {
         "jobId": job.id,
         "jobType": str(job.type),
         "eventId": event_id,
-        "updates": list(update_data.keys()),
-        "extracted": metadata_updates
+        "updates": [
+            *("metadata" if key == "metadata_json" else key for key in update_data),
+            "event_tags",
+        ],
+        "extracted": metadata_updates,
     }
+
+
+def _normalise_labels(values: Any, *, limit: int) -> list[str]:
+    if not isinstance(values, (list, tuple, set)):
+        return []
+    labels: list[str] = []
+    for value in values:
+        label = "-".join(str(value).strip().lower().split())[:64].strip("-")
+        if label and label not in labels:
+            labels.append(label)
+        if len(labels) >= limit:
+            break
+    return labels
+
+
+def _normalise_admission(value: Any) -> str | None:
+    normalized = str(value or "").strip().lower().replace(" ", "")
+    if normalized in {"allages", "all", "family", "familyfriendly"}:
+        return "all"
+    if normalized in {"18", "18+", "18andover"}:
+        return "18+"
+    if normalized in {"21", "21+", "21andover"}:
+        return "21+"
+    return None
+
+
+def _description_supports_admission(description: str, admission: str) -> bool:
+    text_value = " ".join(description.lower().split())
+    if admission == "all":
+        return any(phrase in text_value for phrase in ("all ages", "family friendly"))
+    age = admission.removesuffix("+")
+    return any(
+        phrase in text_value for phrase in (f"{age}+", f"{age} and over", f"ages {age} and up")
+    )
 
 
 async def _handle_market_scan(job: JobRecord, session: AsyncSession) -> dict[str, Any]:
     payload = job.payload or {}
-    market = market_from_payload(payload) or build_market_descriptor(city=str(payload.get("city") or "Austin"))
+    market = market_from_payload(payload) or build_market_descriptor(
+        city=str(payload.get("city") or "Austin")
+    )
     if market is None:
         raise ValueError("MARKET_SCAN job payload requires market or city context")
     # Propagate heat_tier hint (supplied by scheduler) so execute_market_scan can
@@ -241,9 +380,13 @@ async def _handle_market_scan(job: JobRecord, session: AsyncSession) -> dict[str
                 market,
                 filter_signature=filter_signature,
             )
-        await MarketWarmupService(session)._mark_scan_completed(market, success=False, error=f"market_scan failed for angle={angle}")
+        await MarketWarmupService(session)._mark_scan_completed(
+            market, success=False, error=f"market_scan failed for angle={angle}"
+        )
         await session.execute(
-            text("update public.market_inventory_state set scan_lock_until = null where market_key = :key"),
+            text(
+                "update public.market_inventory_state set scan_lock_until = null where market_key = :key"
+            ),
             {"key": market.key},
         )
         await session.commit()
@@ -269,6 +412,8 @@ async def _handle_market_warmup(job: JobRecord, session: AsyncSession) -> dict[s
         market,
         job_id=job.id,
         force_discovery=_parse_bool(payload.get("forceDiscovery")),
+        start_date=str(payload["startDate"]) if payload.get("startDate") else None,
+        end_date=str(payload["endDate"]) if payload.get("endDate") else None,
     )
     return {"jobId": job.id, "jobType": str(job.type), **result}
 
@@ -280,3 +425,18 @@ async def _handle_verify_event(job: JobRecord, session: AsyncSession) -> dict[st
         raise ValueError("VERIFY_EVENT job payload requires string `eventId`")
     result = await VerificationService(session).verify_event(event_id)
     return {"jobId": job.id, "jobType": str(job.type), **result}
+
+
+async def _handle_generate_insights(job: JobRecord, session: AsyncSession) -> dict[str, Any]:
+    payload = job.payload or {}
+    event_id = payload.get("eventId")
+    if not isinstance(event_id, str):
+        raise ValueError("GENERATE_INSIGHTS job payload requires string `eventId`")
+    from aventi_backend.services.insights import InsightsService
+
+    context_hash = str(payload.get("contextHash") or "default")
+    context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+    result = await InsightsService(session).generate_and_cache(
+        event_id, context_hash=context_hash, context=context
+    )
+    return {"jobId": job.id, "jobType": str(job.type), "eventId": event_id, "result": result}

@@ -1,11 +1,24 @@
+from datetime import date as Date
 from datetime import datetime
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 SwipeAction = Literal["like", "pass"]
 ReportReason = Literal["invalid", "cancelled", "duplicate", "unsafe", "other"]
-EventCategory = Literal["nightlife", "dining", "concerts", "wellness", "experiences"]
+EventCategory = Literal[
+    "nightlife",
+    "dining",
+    "concerts",
+    "wellness",
+    "experiences",
+    "comedy",
+    "sports",
+    "outdoors",
+    "markets",
+    "tech",
+]
 EventVibeTag = Literal[
     "chill",
     "energetic",
@@ -16,6 +29,11 @@ EventVibeTag = Literal[
     "live-music",
     "wellness",
     "late-night",
+    "solo-friendly",
+    "family",
+    "adventurous",
+    "intimate",
+    "underground",
 ]
 
 
@@ -55,7 +73,14 @@ class EventCard(BaseModel):
 
 
 class FeedFilters(BaseModel):
+    model_config = {"populate_by_name": True}
     date: Literal["today", "tomorrow", "weekend", "week"]
+    start_date: Date | None = Field(default=None, alias="startDate")
+    end_date: Date | None = Field(default=None, alias="endDate")
+    premium_age_restriction: Literal["all", "18+", "21+"] = Field(
+        default="all", alias="premiumAgeRestriction"
+    )
+    query: str | None = Field(default=None, max_length=120)
     time_of_day: Literal["morning", "afternoon", "evening", "night"] | None = Field(
         default=None, alias="timeOfDay"
     )
@@ -66,11 +91,12 @@ class FeedFilters(BaseModel):
 
 
 class FeedRequest(BaseModel):
+    destination_id: UUID | None = Field(default=None, alias="destinationId")
     cursor: str | None = None
     limit: int = Field(default=20, ge=1, le=50)
     filters: FeedFilters
-    latitude: float
-    longitude: float
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
     market_city: str | None = Field(default=None, alias="marketCity")
     market_state: str | None = Field(default=None, alias="marketState")
     market_country: str | None = Field(default=None, alias="marketCountry")
@@ -79,19 +105,30 @@ class FeedRequest(BaseModel):
 class FeedResponse(BaseModel):
     items: list[EventCard]
     next_cursor: str | None = Field(default=None, alias="nextCursor")
-    fallback_status: Literal["none", "relaxed_filters", "insufficient_inventory", "no_filter_matches"] | None = Field(
-        default=None, alias="fallbackStatus"
-    )
+    fallback_status: (
+        Literal["none", "relaxed_filters", "insufficient_inventory", "no_filter_matches"] | None
+    ) = Field(default=None, alias="fallbackStatus")
     remaining_free_swipes: int | None = Field(default=None, alias="remainingFreeSwipes")
     remaining_free_preference_actions: int | None = Field(
         default=None, alias="remainingFreePreferenceActions"
     )
     market_key: str | None = Field(default=None, alias="marketKey")
-    inventory_status: Literal["ready", "warming", "targeted_warming", "no_matches"] = Field(alias="inventoryStatus")
+    inventory_status: Literal[
+        "ready",
+        "warming",
+        "targeted_warming",
+        "no_matches",
+        "budget_paused",
+        "unavailable",
+        "unsupported",
+    ] = Field(alias="inventoryStatus")
     warmup_triggered: bool = Field(default=False, alias="warmupTriggered")
+    reset_at: datetime | None = Field(default=None, alias="resetAt")
+    retry_at: datetime | None = Field(default=None, alias="retryAt")
 
 
 class SwipePayload(BaseModel):
+    action_id: UUID = Field(alias="actionId")
     event_id: str = Field(alias="eventId")
     action: SwipeAction
     surfaced_at: datetime = Field(alias="surfacedAt")
@@ -115,8 +152,8 @@ class UserPreferences(BaseModel):
 
 
 class ProfileLocationPayload(BaseModel):
-    latitude: float
-    longitude: float
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
     city: str | None = None
     state: str | None = None
     country: str | None = None

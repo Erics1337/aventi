@@ -1,4 +1,4 @@
-import { AdminPortalPage } from '@/components/AventiWebApp';
+import { AdminPortalPage } from '@/components/admin/AdminPortalPage';
 
 export const metadata = {
   title: 'Admin — Aventi',

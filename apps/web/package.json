@@ -6,9 +6,9 @@
     "dev": "next dev --webpack --port 3000",
     "dev:turbo": "next dev --turbopack --port 3000",
     "build": "next build",
-    "lint": "next lint",
+    "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "echo 'No tests for web app yet'"
+    "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@aventi/api-client": "workspace:*",

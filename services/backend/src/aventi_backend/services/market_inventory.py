@@ -10,6 +10,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from aventi_backend.core.settings import get_settings
+from aventi_backend.services.budgets import BudgetManager
+from aventi_backend.services.categories import normalize_category
 from aventi_backend.services.ingest import ManualIngestService
 from aventi_backend.services.jobs import JobQueueRepository, JobRecord, JobType
 from aventi_backend.services.providers import DiscoveryCandidate, build_market_scan_scraper
@@ -21,7 +23,6 @@ MARKET_SCAN_COOLDOWN = timedelta(minutes=30)
 MARKET_WARMUP_COOLDOWN = timedelta(minutes=30)
 TARGETED_MINING_COOLDOWN = timedelta(minutes=10)
 DISCOVERY_ANGLES = ("Chill", "Energetic", "Romantic", "Intellectual")
-ELIGIBLE_VERIFICATION_STATUSES = ("pending", "verified", "suspect")
 
 # Heat-tier thresholds (see plan 0008).
 HEAT_HOT_MIN_USERS_7D = 5
@@ -68,6 +69,11 @@ def build_market_descriptor(
     normalized_city = city.strip()
     normalized_state = state.strip() if state and state.strip() else None
     normalized_country = country.strip().upper() if country and country.strip() else "US"
+    if normalized_country == "USA":
+        normalized_country = "US"
+    if normalized_country != "US":
+        return None
+    normalized_state = normalized_state.upper() if normalized_state else None
     return MarketDescriptor(
         key=build_market_key(normalized_city, normalized_state, normalized_country),
         city=normalized_city,
@@ -79,23 +85,13 @@ def build_market_descriptor(
 
 
 def market_from_payload(payload: dict[str, Any]) -> MarketDescriptor | None:
-    market_key = payload.get("marketKey")
     market_city = payload.get("marketCity") or payload.get("city")
     if not isinstance(market_city, str) or not market_city.strip():
         return None
-    if not isinstance(market_key, str) or not market_key.strip():
-        return build_market_descriptor(
-            city=market_city,
-            state=payload.get("marketState"),
-            country=payload.get("marketCountry"),
-            center_latitude=_coerce_float(payload.get("centerLatitude")),
-            center_longitude=_coerce_float(payload.get("centerLongitude")),
-        )
-    return MarketDescriptor(
-        key=market_key,
-        city=market_city.strip(),
-        state=_optional_str(payload.get("marketState")),
-        country=_optional_str(payload.get("marketCountry")) or "US",
+    return build_market_descriptor(
+        city=market_city,
+        state=payload.get("marketState"),
+        country=payload.get("marketCountry"),
         center_latitude=_coerce_float(payload.get("centerLatitude")),
         center_longitude=_coerce_float(payload.get("centerLongitude")),
     )
@@ -127,7 +123,7 @@ async def execute_market_scan(
     if source_data is not None:
         payload["sourceData"] = source_data
 
-    scraper = build_market_scan_scraper(payload)
+    scraper = build_market_scan_scraper(payload, budget_manager=BudgetManager(session))
     candidates = await scraper.discover(city=market.city, angle=angle)
     # Scrapers that instrument themselves (SerpApiEventScraper) stash pagination
     # + timing stats on last_meta; others leave it empty.
@@ -227,7 +223,9 @@ async def count_visible_market_events(
               and eo.starts_at >= :start_ts
               and eo.starts_at < :end_ts
               and e.hidden = false
-              and e.verification_status = any(:eligible_statuses)
+              and e.verification_status = 'verified'
+              and e.last_verified_active is true
+              and e.last_verified_at >= :verification_cutoff
               and lower(v.city) = :city
               and (lower(coalesce(v.state, '')) = :state or v.state is null)
               and lower(coalesce(v.country, 'us')) = :country
@@ -236,7 +234,8 @@ async def count_visible_market_events(
         {
             "start_ts": now,
             "end_ts": now + MARKET_ACTIVE_WINDOW,
-            "eligible_statuses": list(ELIGIBLE_VERIFICATION_STATUSES),
+            "verification_cutoff": now
+            - timedelta(hours=get_settings().feed_verification_max_age_hours),
             "city": market.city.lower(),
             "state": (market.state or "").lower(),
             "country": market.country.lower(),
@@ -316,18 +315,22 @@ class MarketWarmupService:
     async def enqueue_admin_short_market_scan(self, market_key: str) -> JobRecord:
         """Queue a single short-window ``MARKET_SCAN`` (SerpAPI) for an existing market row."""
         row = (
-            await self.session.execute(
-                text(
-                    """
+            (
+                await self.session.execute(
+                    text(
+                        """
                     select market_key, city, state, country,
                            center_latitude, center_longitude, heat_tier
                     from public.market_inventory_state
                     where market_key = :market_key
                     """
-                ),
-                {"market_key": market_key},
+                    ),
+                    {"market_key": market_key},
+                )
             )
-        ).mappings().first()
+            .mappings()
+            .first()
+        )
         if not row:
             raise ValueError(f"Unknown market_key: {market_key}")
         market = MarketDescriptor(
@@ -362,7 +365,36 @@ class MarketWarmupService:
         *,
         force_refresh: bool = False,
         visible_count: int | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        admission_limits: list[tuple[str, int]] | None = None,
     ) -> tuple[str, str, bool]:
+        await self.session.execute(
+            text("select pg_advisory_xact_lock(hashtext(:key))"),
+            {"key": f"market-warmup:{market.key}"},
+        )
+        cooling = await self.session.scalar(
+            text(
+                "select scan_lock_until>now() from public.market_inventory_state where market_key=:key"
+            ),
+            {"key": market.key},
+        )
+        if cooling:
+            return market.key, "warming", False
+        if not await BudgetManager(self.session).remaining("serpapi"):
+            return market.key, "budget_paused", False
+        for identity, cap in admission_limits or []:
+            count = await self.session.scalar(
+                text("""
+                insert into public.request_limits(key,window_start,count)
+                values (:key,date_trunc('day',now() at time zone 'UTC') at time zone 'UTC',1)
+                on conflict(key,window_start) do update set count=request_limits.count+1
+                where request_limits.count<:cap returning count
+            """),
+                {"key": hashlib.sha256(identity.encode()).hexdigest(), "cap": cap},
+            )
+            if count is None:
+                return market.key, "unavailable", False
         await self.touch_market_request(market)
         if visible_count is None:
             visible_count = await self.refresh_market_inventory_state(market)
@@ -378,12 +410,15 @@ class MarketWarmupService:
             triggered = await self._enqueue_market_warmup_job(
                 market,
                 force_discovery=True,
-                ignore_cooldown=True,
+                start_date=start_date,
+                end_date=end_date,
             )
             return market.key, "warming", triggered
         if active_discovery_jobs:
             return market.key, "warming", False
-        triggered = await self._enqueue_market_warmup_job(market)
+        triggered = await self._enqueue_market_warmup_job(
+            market, start_date=start_date, end_date=end_date
+        )
         return market.key, "warming", triggered
 
     async def request_targeted_mining(
@@ -504,6 +539,7 @@ class MarketWarmupService:
             requested += 1
             if await self._enqueue_market_warmup_job(market):
                 triggered += 1
+        await self.session.commit()
         return {"requested": requested, "triggered": triggered}
 
     async def run_market_warmup(
@@ -512,6 +548,8 @@ class MarketWarmupService:
         *,
         job_id: str | None = None,
         force_discovery: bool = False,
+        start_date: str | None = None,
+        end_date: str | None = None,
     ) -> dict[str, Any]:
         started_at = datetime.now(tz=UTC)
         await self._mark_scan_started(market, started_at)
@@ -534,13 +572,25 @@ class MarketWarmupService:
 
             visible_count = await self.refresh_market_inventory_state(market)
             discovery_jobs_enqueued = 0
-            if force_discovery or visible_count < MARKET_WARM_TARGET:
-                for angle in DISCOVERY_ANGLES:
+            if force_discovery or (start_date and end_date) or visible_count < MARKET_WARM_TARGET:
+                angles = ("events",) if start_date and end_date else DISCOVERY_ANGLES
+                for angle in angles:
+                    source_data = None
+                    if start_date and end_date:
+                        source_data = {
+                            "dateWindow": {
+                                "label": "travel",
+                                "startDate": start_date,
+                                "endDate": end_date,
+                            },
+                            "pages": PAGE_BUDGET_BY_TIER.get(market.heat_tier, 1),
+                        }
                     await self._enqueue_market_scan_job(
                         market,
                         angle=angle,
                         source_name="serpapi",
                         source_type="serpapi",
+                        source_data=source_data,
                     )
                     discovery_jobs_enqueued += 1
 
@@ -563,7 +613,8 @@ class MarketWarmupService:
         market: MarketDescriptor,
         *,
         force_discovery: bool = False,
-        ignore_cooldown: bool = False,
+        start_date: str | None = None,
+        end_date: str | None = None,
     ) -> bool:
         now = datetime.now(tz=UTC)
         lock_until = await self.session.scalar(
@@ -579,7 +630,7 @@ class MarketWarmupService:
         if lock_until and getattr(lock_until, "tzinfo", None) is None:
             lock_until = lock_until.replace(tzinfo=UTC)
 
-        if not ignore_cooldown and isinstance(lock_until, datetime) and lock_until > now:
+        if isinstance(lock_until, datetime) and lock_until > now:
             return False
 
         await self._upsert_market_state(
@@ -598,6 +649,8 @@ class MarketWarmupService:
                 "centerLatitude": market.center_latitude,
                 "centerLongitude": market.center_longitude,
                 "forceDiscovery": force_discovery,
+                "startDate": start_date,
+                "endDate": end_date,
             },
         )
         return True
@@ -858,7 +911,10 @@ class MarketWarmupService:
             angle=str(short_window["angle"]),
             source_name=f"bootstrap-short:{market.city.lower()}",
             source_type="serpapi",
-            source_data={"dateWindow": dict(short_window), "pages": PAGE_BUDGET_BY_TIER["bootstrap"]},
+            source_data={
+                "dateWindow": dict(short_window),
+                "pages": PAGE_BUDGET_BY_TIER["bootstrap"],
+            },
             extra_payload={"scanType": "bootstrap", "heatTier": "bootstrap"},
         )
         return True
@@ -1041,7 +1097,6 @@ class MarketWarmupService:
                 "last_error_set": last_error is not _UNSET,
             },
         )
-        await self.session.commit()
 
 
 def _build_manual_events(
@@ -1054,15 +1109,12 @@ def _build_manual_events(
     source_name: str,
     job_id: str | None,
 ) -> list[dict[str, Any]]:
-    base_time = datetime.now(tz=UTC) + timedelta(hours=4)
     manual_events: list[dict[str, Any]] = []
-    for index, candidate in enumerate(candidates):
-        starts_at = candidate.starts_at or (base_time + timedelta(hours=index * 2))
-        ends_at = (
-            candidate.ends_at
-            or (candidate.starts_at + timedelta(hours=3) if candidate.starts_at else None)
-            or (base_time + timedelta(hours=index * 2 + 3))
-        )
+    for candidate in candidates:
+        if candidate.starts_at is None or not candidate.venue_name:
+            continue
+        starts_at = candidate.starts_at
+        ends_at = candidate.ends_at
 
         # Build ticket_offers list for downstream storage
         ticket_offers_payload = [
@@ -1089,14 +1141,14 @@ def _build_manual_events(
         manual_events.append(
             {
                 "title": candidate.title,
-                "description": candidate.description or f"Discovered by MARKET_SCAN worker ({angle})",
+                "description": candidate.description or "",
                 "category": _normalize_category(candidate.category),
                 "bookingUrl": candidate.booking_url,
                 "startsAt": starts_at.isoformat(),
-                "endsAt": ends_at.isoformat(),
+                "endsAt": ends_at.isoformat() if ends_at else None,
                 "timezone": candidate.timezone or "UTC",
                 "city": candidate.city or city,
-                "venueName": candidate.venue_name or f"{city} Spotlight",
+                "venueName": candidate.venue_name,
                 "venueAddress": candidate.venue_address,
                 "state": candidate.venue_state or state,
                 "country": country,
@@ -1123,21 +1175,7 @@ def _build_manual_events(
 
 
 def _normalize_category(value: str | None) -> str:
-    if not value:
-        return "experiences"
-    normalized = value.strip().lower()
-    if normalized in {"nightlife", "dining", "concerts", "wellness", "experiences"}:
-        return normalized
-    if "music" in normalized or "concert" in normalized or "show" in normalized:
-        return "concerts"
-    if "food" in normalized or "drink" in normalized or "dining" in normalized:
-        return "dining"
-    if "well" in normalized or "fitness" in normalized or "yoga" in normalized:
-        return "wellness"
-    if "night" in normalized or "club" in normalized or "bar" in normalized:
-        return "nightlife"
-    return "experiences"
-
+    return normalize_category(value)
 
 def _optional_str(value: Any) -> str | None:
     if value is None:
@@ -1197,7 +1235,9 @@ def _date_window_for_filters(date_filter: str, now: datetime) -> tuple[datetime,
         return now, now + timedelta(days=7)
 
     days_until_sat = (5 - now.weekday()) % 7
-    saturday = (now + timedelta(days=days_until_sat)).replace(hour=0, minute=0, second=0, microsecond=0)
+    saturday = (now + timedelta(days=days_until_sat)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
     if saturday < now:
         saturday += timedelta(days=7)
     return saturday, saturday + timedelta(days=2)
@@ -1218,7 +1258,9 @@ def _time_of_day_matches(starts_at: datetime, bucket: str | None) -> bool:
     return True
 
 
-def _haversine_miles(lat1: float, lon1: float, lat2: float | None, lon2: float | None) -> float | None:
+def _haversine_miles(
+    lat1: float, lon1: float, lat2: float | None, lon2: float | None
+) -> float | None:
     if lat2 is None or lon2 is None:
         return None
     from math import acos, cos, radians, sin
@@ -1260,11 +1302,17 @@ def _candidate_matches_filters(
 
     radius_miles = _coerce_float(feed_filters.get("radiusMiles"))
     if radius_miles is not None and latitude is not None and longitude is not None:
-        miles = _haversine_miles(latitude, longitude, candidate.venue_latitude, candidate.venue_longitude)
+        miles = _haversine_miles(
+            latitude, longitude, candidate.venue_latitude, candidate.venue_longitude
+        )
         if miles is None or miles > radius_miles:
             return False
 
-    categories = [str(value).strip().lower() for value in (feed_filters.get("categories") or []) if str(value).strip()]
+    categories = [
+        str(value).strip().lower()
+        for value in (feed_filters.get("categories") or [])
+        if str(value).strip()
+    ]
     candidate_category = _normalize_category(candidate.category)
     if categories and candidate_category not in categories:
         return False

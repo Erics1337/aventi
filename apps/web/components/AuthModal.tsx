@@ -76,7 +76,7 @@ export function AuthModal() {
     if (auth.isAnonymousUser && auth.authPromptReason === 'welcome' && auth.authPromptVisible) {
       auth.closeAuthPrompt();
     }
-  }, [auth.isAnonymousUser, auth.authPromptReason, auth.authPromptVisible, auth.closeAuthPrompt]);
+  }, [auth]);
 
   const copy = reasonCopy[auth.authPromptReason];
   const canCloseWithoutGuest = auth.isAuthenticated;

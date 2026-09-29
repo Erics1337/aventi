@@ -4,10 +4,17 @@ set -euo pipefail
 PROJECT="${PROJECT:-aventi}"
 ENV="${ENV:-dev}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
-RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-services/backend/.env.production}"
+case "$ENV" in
+  prod|production) RUNTIME_ENV_NAME=production ;;
+  dev|development) RUNTIME_ENV_NAME=development ;;
+  staging) RUNTIME_ENV_NAME=staging ;;
+  *) echo "Unknown deployment environment" >&2; exit 1 ;;
+esac
+RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE:-services/backend/.env.${RUNTIME_ENV_NAME}}"
 SECRET_NAME="${AVENTI_RUNTIME_SECRET_NAME:-${PROJECT}-${ENV}/backend/env}"
 
 KEYS=(
+  AVENTI_ENV
   AVENTI_BACKEND_LOG_LEVEL
   AVENTI_DATABASE_URL
   AVENTI_SUPABASE_URL
@@ -27,6 +34,20 @@ KEYS=(
   GOOGLE_API_KEY
   SERPAPI_API_KEY
   POLLINATIONS_API_KEY
+  AVENTI_CORS_ORIGINS
+  AVENTI_REQUEST_LIMIT_PER_MINUTE
+  AVENTI_PURCHASES_ENABLED
+  AVENTI_PAID_DISCOVERY_ENABLED
+  AVENTI_PROVIDER_DAILY_BUDGETS
+  AVENTI_PROVIDER_MONTHLY_BUDGET_MICROUSD
+  AVENTI_PROVIDER_MAX_COST_MICROUSD
+  REVENUECAT_SECRET_KEY
+  REVENUECAT_WEBHOOK_SECRET
+  REVENUECAT_MONTHLY_PRODUCT_ID
+  REVENUECAT_ANNUAL_PRODUCT_ID
+  REVENUECAT_ENTITLEMENT_ID
+  GOOGLE_GEOCODING_API_KEY
+  GOOGLE_TIMEZONE_API_KEY
 )
 
 if [[ ! -f "$RUNTIME_ENV_FILE" ]]; then
@@ -45,7 +66,7 @@ fi
 tmp_json="$(mktemp)"
 trap 'rm -f "$tmp_json"' EXIT
 
-python3 - "$RUNTIME_ENV_FILE" "$tmp_json" "${KEYS[@]}" <<'PY'
+python3 - "$RUNTIME_ENV_FILE" "$tmp_json" "$RUNTIME_ENV_NAME" "${KEYS[@]}" <<'PY'
 import ast
 import json
 import re
@@ -54,7 +75,8 @@ from pathlib import Path
 
 env_file = Path(sys.argv[1])
 output_file = Path(sys.argv[2])
-allowed_keys = sys.argv[3:]
+expected_environment = sys.argv[3]
+allowed_keys = sys.argv[4:]
 wanted = set(allowed_keys)
 env = {}
 
@@ -88,6 +110,9 @@ missing = [key for key in allowed_keys if key not in env]
 if missing:
     print("Skipping missing or empty keys: " + ", ".join(missing), file=sys.stderr)
 
+configured_environment = {"prod": "production", "dev": "development"}.get(env.get("AVENTI_ENV"), env.get("AVENTI_ENV"))
+if configured_environment != expected_environment:
+    raise SystemExit("Runtime secret file AVENTI_ENV must explicitly match the selected deployment environment")
 output_file.write_text(json.dumps(env, indent=2, sort_keys=True) + "\n")
 PY
 

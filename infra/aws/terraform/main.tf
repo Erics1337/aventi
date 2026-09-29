@@ -19,7 +19,7 @@ data "aws_subnets" "default" {
 #
 resource "aws_ecr_repository" "worker" {
   name                 = "${local.name_prefix}-worker"
-  image_tag_mutability = var.environment == "prod" ? "IMMUTABLE" : "MUTABLE"
+  image_tag_mutability = "IMMUTABLE"
   force_delete         = var.environment == "prod" ? false : true
 
   image_scanning_configuration {
@@ -70,7 +70,7 @@ resource "aws_sqs_queue" "worker_jobs_dlq" {
 
 resource "aws_sqs_queue" "worker_jobs" {
   name                       = "${local.name_prefix}-worker-jobs"
-  visibility_timeout_seconds = 900
+  visibility_timeout_seconds = 5400
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.worker_jobs_dlq.arn
     maxReceiveCount     = 5
@@ -174,9 +174,10 @@ resource "aws_lambda_function" "worker" {
 }
 
 resource "aws_lambda_event_source_mapping" "worker_sqs" {
-  event_source_arn = aws_sqs_queue.worker_jobs.arn
-  function_name    = aws_lambda_function.worker.arn
-  batch_size       = 1
+  event_source_arn        = aws_sqs_queue.worker_jobs.arn
+  function_name           = aws_lambda_function.worker.arn
+  batch_size              = 1
+  function_response_types = ["ReportBatchItemFailures"]
 }
 
 resource "aws_iam_role" "lambda_api" {
@@ -278,7 +279,7 @@ resource "aws_lambda_function_url" "api" {
   authorization_type = "NONE"
   cors {
     allow_credentials = true
-    allow_origins     = ["*"]
+    allow_origins     = var.cors_origins
     allow_methods     = ["*"]
     allow_headers     = ["content-type", "authorization", "x-api-key", "date", "keep-alive"]
     expose_headers    = ["keep-alive", "date"]
@@ -366,4 +367,98 @@ resource "aws_lambda_permission" "allow_eventbridge_scheduler" {
   function_name = aws_lambda_function.scheduler.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.weekly_market_scan.arn
+}
+
+resource "aws_cloudwatch_event_rule" "maintenance" {
+  name                = "${local.name_prefix}-maintenance"
+  schedule_expression = "rate(1 minute)"
+}
+resource "aws_cloudwatch_event_target" "maintenance" {
+  rule  = aws_cloudwatch_event_rule.maintenance.name
+  arn   = aws_lambda_function.scheduler.arn
+  input = jsonencode({ mode = "maintenance" })
+}
+resource "aws_lambda_permission" "maintenance" {
+  statement_id  = "AllowMaintenance"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.scheduler.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.maintenance.arn
+}
+resource "aws_sns_topic" "alerts" { name = "${local.name_prefix}-alerts" }
+resource "aws_sns_topic_subscription" "alerts" {
+  for_each  = toset(var.alert_emails)
+  topic_arn = aws_sns_topic.alerts.arn
+  protocol  = "email"
+  endpoint  = each.value
+}
+resource "aws_cloudwatch_metric_alarm" "dead_letters" {
+  alarm_name          = "${local.name_prefix}-dead-letters"
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateNumberOfMessagesVisible"
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+  dimensions          = { QueueName = aws_sqs_queue.worker_jobs_dlq.name }
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+}
+resource "aws_cloudwatch_metric_alarm" "queue_age" {
+  alarm_name          = "${local.name_prefix}-queue-age"
+  namespace           = "AWS/SQS"
+  metric_name         = "ApproximateAgeOfOldestMessage"
+  statistic           = "Maximum"
+  period              = 60
+  evaluation_periods  = 5
+  threshold           = 900
+  comparison_operator = "GreaterThanThreshold"
+  dimensions          = { QueueName = aws_sqs_queue.worker_jobs.name }
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+}
+resource "aws_cloudwatch_metric_alarm" "api_errors" {
+  alarm_name          = "${local.name_prefix}-api-errors"
+  namespace           = "AWS/Lambda"
+  metric_name         = "Errors"
+  statistic           = "Sum"
+  period              = 60
+  evaluation_periods  = 2
+  threshold           = 5
+  comparison_operator = "GreaterThanThreshold"
+  dimensions          = { FunctionName = aws_lambda_function.api.function_name }
+  alarm_actions       = [aws_sns_topic.alerts.arn]
+}
+
+locals {
+  application_alerts = {
+    api_server_errors = { log = aws_cloudwatch_log_group.api.name, event = "api.server_error" }
+    subscription_sync = { log = aws_cloudwatch_log_group.api.name, event = "membership.sync_failed" }
+    provider_failures = { log = aws_cloudwatch_log_group.worker.name, event = "worker.lambda.error" }
+    budget_exhaustion = { log = aws_cloudwatch_log_group.worker.name, event = "worker.lambda.budget_skipped" }
+  }
+}
+resource "aws_cloudwatch_log_metric_filter" "application" {
+  for_each       = local.application_alerts
+  name           = "${local.name_prefix}-${each.key}"
+  log_group_name = each.value.log
+  pattern        = "{ $.event = \"${each.value.event}\" }"
+  metric_transformation {
+    name          = each.key
+    namespace     = "Aventi/${var.environment}"
+    value         = "1"
+    default_value = 0
+  }
+}
+resource "aws_cloudwatch_metric_alarm" "application" {
+  for_each            = local.application_alerts
+  alarm_name          = "${local.name_prefix}-${each.key}"
+  namespace           = "Aventi/${var.environment}"
+  metric_name         = each.key
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
 }

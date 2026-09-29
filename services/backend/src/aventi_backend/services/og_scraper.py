@@ -14,6 +14,8 @@ from urllib.parse import urljoin
 
 import httpx
 
+from aventi_backend.services.safe_http import ResponseTooLargeError, UnsafeUrlError, safe_fetch
+
 __all__ = ["OGImage", "fetch_og_image"]
 
 # Browser-ish UA so CDNs (Eventbrite, Ticketmaster, Facebook, Instagram, etc.)
@@ -113,24 +115,32 @@ async def fetch_og_image(
     if not url or not url.lower().startswith(("http://", "https://")):
         return None
 
-    owns_client = client is None
-    http_client = client or httpx.AsyncClient(
-        follow_redirects=True,
-        headers=_DEFAULT_HEADERS,
-    )
     try:
-        response = await http_client.get(url, timeout=timeout_seconds)
+        response = await safe_fetch(
+            url,
+            headers=_DEFAULT_HEADERS,
+            timeout_seconds=timeout_seconds,
+            max_bytes=_MAX_READ_BYTES,
+            allowed_content_types=(
+                "text/html",
+                "application/xhtml+xml",
+                "application/xml",
+                "text/xml",
+            ),
+            client=client,
+        )
         if response.status_code >= 400:
             return None
         content_type = response.headers.get("content-type", "")
-        if content_type and "html" not in content_type.lower() and "xml" not in content_type.lower():
+        if (
+            content_type
+            and "html" not in content_type.lower()
+            and "xml" not in content_type.lower()
+        ):
             return None
         # response.text decodes via apparent encoding; slice after decode.
-        body = response.text[:_MAX_READ_BYTES * 2]
+        body = response.text[: _MAX_READ_BYTES * 2]
         metas = _parse_meta_tags(body)
         return _extract_image(metas, base_url=str(response.url))
-    except (httpx.HTTPError, UnicodeDecodeError):
+    except (httpx.HTTPError, UnicodeDecodeError, UnsafeUrlError, ResponseTooLargeError):
         return None
-    finally:
-        if owns_client:
-            await http_client.aclose()

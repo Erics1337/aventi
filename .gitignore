@@ -58,3 +58,7 @@ supabase/.temp
 
 .agents
 pc-api-key.json
+
+# Terraform plans can embed sensitive runtime configuration
+infra/aws/terraform/tfplan
+*.tsbuildinfo

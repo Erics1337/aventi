@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
@@ -7,6 +7,7 @@ import {
   Share,
   Text,
   View,
+  AppState,
   useWindowDimensions,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -26,6 +27,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { aventiApi } from '../../lib/api';
 import { useAuthSession } from '../../lib/auth-session';
 import { useLocationGate } from '../../lib/location-gate';
+import { pendingSwipeQueue } from '../../lib/swipe-queue';
+import { createSwipeActionId } from '../../lib/swipe-action-id';
 
 function mergeUniqueEvents(existing: EventCardModel[], incoming: EventCardModel[]): EventCardModel[] {
   if (existing.length === 0) return incoming;
@@ -36,7 +39,7 @@ function mergeUniqueEvents(existing: EventCardModel[], incoming: EventCardModel[
 
 const WEEKDAY_FORMATTER = new Intl.DateTimeFormat(undefined, { weekday: 'long' });
 const MONTH_DAY_FORMATTER = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
-const DEFAULT_RADIUS_MILES = 25;
+const DEFAULT_RADIUS_MILES = 10;
 const DEFAULT_DISCOVERY_FILTERS: FeedFilters = {
   date: 'week',
   timeOfDay: undefined,
@@ -137,13 +140,24 @@ function formatDateFilterLabel(date: FeedFilters['date']): string {
 }
 
 export default function HomeScreen() {
+  const travelParams = useLocalSearchParams<{
+    destinationId?: string;
+    startDate?: string;
+    endDate?: string;
+    radiusMiles?: string;
+    premiumAgeRestriction?: FeedFilters['premiumAgeRestriction'];
+  }>();
   const auth = useAuthSession();
+  const authSessionRef = useRef(auth.session);
+  authSessionRef.current = auth.session;
   const location = useLocationGate();
   const queryClient = useQueryClient();
   const { height: windowHeight } = useWindowDimensions();
   const listRef = useRef<FlashListRef<EventCardModel>>(null);
   const impressionSeenRef = useRef<Set<string>>(new Set());
   const dismissedIdsRef = useRef<Set<string>>(new Set());
+  const optimisticSwipeEventsRef = useRef<Map<string, EventCardModel>>(new Map());
+  const swipeRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mineOnNextFeedRequestRef = useRef(false);
   const autoMineTriggeredRef = useRef(false);
   const autoMineAttemptsRef = useRef(0);
@@ -178,12 +192,25 @@ export default function HomeScreen() {
   const [uiNotice, setUiNotice] = useState<string | null>(null);
   const [filterSheetVisible, setFilterSheetVisible] = useState(false);
   const [filters, setFilters] = useState<FeedFilters>(DEFAULT_DISCOVERY_FILTERS);
+  const destinationId = location.travelModeOverride?.id;
   const [nowTick, setNowTick] = useState<number>(() => Date.now());
 
   useEffect(() => {
     const interval = setInterval(() => setNowTick(Date.now()), 60_000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!destinationId || travelParams.destinationId !== destinationId) return;
+    const radius = Number(travelParams.radiusMiles);
+    setFilters((current) => ({
+      ...current,
+      startDate: travelParams.startDate,
+      endDate: travelParams.endDate,
+      radiusMiles: [5, 10, 25, 50, 100].includes(radius) ? radius : current.radiusMiles,
+      premiumAgeRestriction: travelParams.premiumAgeRestriction ?? 'all',
+    }));
+  }, [destinationId, travelParams.destinationId, travelParams.endDate, travelParams.premiumAgeRestriction, travelParams.radiusMiles, travelParams.startDate]);
 
   const appUnlocked = auth.isReady && auth.isAuthenticated;
   const serverCallsEnabled = appUnlocked;
@@ -215,6 +242,10 @@ export default function HomeScreen() {
       filters.timeOfDay,
       filters.price,
       filters.radiusMiles,
+      filters.startDate,
+      filters.endDate,
+      filters.premiumAgeRestriction,
+      destinationId,
       (filters.vibes ?? []).join(','),
       (filters.categories ?? []).join(','),
       feedCursor,
@@ -230,6 +261,7 @@ export default function HomeScreen() {
         marketCountry: location.effectiveLocation?.country ?? undefined,
         limit: 20,
         filters,
+        destinationId,
         cursor: feedCursor ?? undefined,
       };
       const timeoutMs = 30_000;
@@ -277,10 +309,14 @@ export default function HomeScreen() {
     location.effectiveLocation?.latitude,
     location.effectiveLocation?.longitude,
     location.isTravelModeActive,
+    destinationId,
     filters.date,
     filters.timeOfDay,
     filters.price,
     filters.radiusMiles,
+    filters.startDate,
+    filters.endDate,
+    filters.premiumAgeRestriction,
     (filters.vibes ?? []).join(','),
     (filters.categories ?? []).join(','),
   ]);
@@ -378,49 +414,67 @@ export default function HomeScreen() {
 
   const pageHeight = Math.max(280, Math.floor(feedViewportHeight || windowHeight * 0.58));
 
-  const swipeMutation = useMutation({
-    mutationFn: (payload: Parameters<typeof aventiApi.postSwipe>[0]) => aventiApi.postSwipe(payload),
-    onSuccess: (result) => {
-      const remaining = result.remainingFreePreferenceActions ?? result.remainingFreeSwipes;
-      if (typeof remaining === 'number') {
-        setRemainingPreferenceActions(remaining);
-      }
-    },
-    onError: () => {
-      setUiNotice('Preference action applied locally, but Aventi could not sync it to the server.');
-    },
-  });
-
   const [upgradePromptVisible, setUpgradePromptVisible] = useState(false);
   const UPGRADE_PROMPT_THRESHOLD = 3;
   const UPGRADE_PROMPT_STORAGE_KEY = 'aventi_upgrade_prompt_dismissed';
 
-  const favoriteMutation = useMutation({
-    mutationFn: (eventId: string) => aventiApi.saveFavorite(eventId),
-    onSuccess: async () => {
+  const flushPendingSwipes = useCallback(async (force = false) => {
+    const accountId = auth.session?.user.id;
+    if (!accountId) return;
+    const result = await pendingSwipeQueue.flush(
+      accountId,
+      async (payload) => {
+        const activeSession = authSessionRef.current;
+        if (activeSession?.user.id !== accountId) throw new Error('Account changed before swipe sync.');
+        const response = await aventiApi.postSwipe(payload, activeSession.access_token);
+        const remaining = response.remainingFreePreferenceActions ?? response.remainingFreeSwipes;
+        if (typeof remaining === 'number') setRemainingPreferenceActions(remaining);
+        return response;
+      },
+      { force },
+    );
+    if (authSessionRef.current?.user.id !== accountId) return;
+    if (result.sent.some((payload) => payload.action === 'like')) {
       void queryClient.invalidateQueries({ queryKey: ['favorites'] });
-
-      // Show soft upgrade prompt for guest users after threshold saves
-      if (auth.isAnonymousUser) {
-        try {
-          const dismissed = await AsyncStorage.getItem(UPGRADE_PROMPT_STORAGE_KEY);
-          if (dismissed === 'true') return;
-
-          const favoritesData = queryClient.getQueryData<{ items: string[] }>(['favorites', auth.session?.user.id ?? 'no-session']);
-          const savedCount = favoritesData?.items?.length ?? 0;
-
-          if (savedCount >= UPGRADE_PROMPT_THRESHOLD) {
-            setUpgradePromptVisible(true);
-          }
-        } catch {
-          // Ignore storage errors
-        }
+    }
+    for (const { payload } of result.rejected) {
+      const originalEvent = optimisticSwipeEventsRef.current.get(payload.actionId);
+      setEventActions((previous) => {
+        const next = { ...previous };
+        delete next[payload.eventId];
+        return next;
+      });
+      if (originalEvent && payload.action === 'pass') {
+        dismissedIdsRef.current.delete(payload.eventId);
+        setTimelineEvents((previous) =>
+          previous.some((event) => event.id === originalEvent.id) ? previous : [originalEvent, ...previous],
+        );
       }
-    },
-    onError: () => {
-      setUiNotice('Could not save favorite right now.');
-    },
-  });
+      if (!isPremium) setRemainingPreferenceActions((value) => value + 1);
+      optimisticSwipeEventsRef.current.delete(payload.actionId);
+    }
+    if (result.rejected.length > 0) {
+      setUiNotice('Aventi rejected an action, so its local change was rolled back.');
+    } else if (result.pending.length > 0) {
+      setUiNotice('Action saved on this device and will retry automatically.');
+      if (swipeRetryTimerRef.current) clearTimeout(swipeRetryTimerRef.current);
+      const retryIn = Math.max(500, Date.parse(result.pending[0].retryAt) - Date.now());
+      swipeRetryTimerRef.current = setTimeout(() => void flushPendingSwipes(), retryIn);
+    }
+  }, [auth.session?.user.id, isPremium, queryClient]);
+
+  useEffect(() => {
+    if (!auth.session?.user.id) return;
+    void flushPendingSwipes();
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void flushPendingSwipes();
+    });
+    return () => {
+      subscription.remove();
+      pendingSwipeQueue.cancelAccount(auth.session!.user.id);
+      if (swipeRetryTimerRef.current) clearTimeout(swipeRetryTimerRef.current);
+    };
+  }, [auth.session?.user.id, flushPendingSwipes]);
 
   const impressionMutation = useMutation({
     mutationFn: (payload: Parameters<typeof aventiApi.recordFeedImpression>[0]) =>
@@ -465,36 +519,46 @@ export default function HomeScreen() {
         }
       }
 
-      if (action === 'like') {
-        if (canPersistServerActions) {
-          favoriteMutation.mutate(event.id);
-        } else {
-          auth.requireSessionBackedGuestOrAccount('favorites');
-          setUiNotice('Start a guest session or sign in to persist Favorites.');
-        }
-      }
-
       if (!canPersistServerActions) {
+        auth.requireSessionBackedGuestOrAccount('favorites');
+        setUiNotice('Start a guest session or sign in to save this action.');
         return;
       }
 
-      swipeMutation.mutate({
+      const accountId = auth.session!.user.id;
+      const payload = {
+        actionId: createSwipeActionId(),
         eventId: event.id,
         action,
         surfacedAt: new Date().toISOString(),
         position,
         vibes: event.vibes,
-      });
+      };
+      optimisticSwipeEventsRef.current.set(payload.actionId, event);
+      await pendingSwipeQueue.enqueue(accountId, payload);
+      await flushPendingSwipes(true);
+
+      if (action === 'like' && auth.isAnonymousUser) {
+        try {
+          const dismissed = await AsyncStorage.getItem(UPGRADE_PROMPT_STORAGE_KEY);
+          if (dismissed !== 'true') {
+            const favoritesData = queryClient.getQueryData<{ items: string[] }>(['favorites', accountId]);
+            if ((favoritesData?.items?.length ?? 0) >= UPGRADE_PROMPT_THRESHOLD) setUpgradePromptVisible(true);
+          }
+        } catch {
+          // Upgrade messaging is optional; the swipe remains durable.
+        }
+      }
     },
     [
       auth,
       canPersistServerActions,
       detailEvent?.id,
       eventActions,
-      favoriteMutation,
+      flushPendingSwipes,
       isPremium,
+      queryClient,
       remainingPreferenceActions,
-      swipeMutation,
     ],
   );
 
@@ -669,12 +733,12 @@ export default function HomeScreen() {
   const statusLine = !appUnlocked
     ? auth.guestAuthError ?? 'Start a guest session or sign in to begin discovery'
     : !location.effectiveLocation
-      ? location.errorMessage ?? 'Choose device or travel coordinates to initialize your local feed'
+      ? location.errorMessage ?? 'Enable device location or choose a Travel Mode destination to initialize your feed'
       : feedQuery.isLoading && timelineEvents.length === 0
         ? 'Synthesizing your local event feed...'
         : feedQuery.isError && timelineEvents.length === 0
-          ? 'Could not load the feed from FastAPI. Check EXPO_PUBLIC_API_BASE_URL and backend status.'
-          : `${remainingPreferenceActions} free preference actions left today • ${location.effectiveLocation.label}`;
+          ? 'Aventi discovery is temporarily unavailable.'
+          : `${remainingPreferenceActions} free preference actions left${feedQuery.data?.resetAt ? ` · resets ${new Date(feedQuery.data.resetAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ' today'} • ${location.effectiveLocation.label}`;
 
   const onViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
@@ -869,6 +933,10 @@ export default function HomeScreen() {
     filters.timeOfDay !== undefined ||
     filters.price !== 'any' ||
     filters.radiusMiles !== DEFAULT_RADIUS_MILES ||
+    filters.startDate !== undefined ||
+    filters.endDate !== undefined ||
+    filters.premiumAgeRestriction !== undefined ||
+    destinationId !== undefined ||
     (filters.vibes?.length ?? 0) > 0 ||
     (filters.categories?.length ?? 0) > 0;
   const filterChips = [
@@ -1045,7 +1113,7 @@ export default function HomeScreen() {
             <Text className="text-sm uppercase tracking-[2px] text-white/65">Location Setup</Text>
             <Text className="mt-2 text-lg font-semibold text-white">Finish onboarding to unlock your local feed.</Text>
             <Text className="mt-2 text-sm leading-5 text-white/70">
-              Grant device location or enter Travel Mode coordinates for testing. Either path unlocks discovery now.
+              Enable device location or choose a supported Travel Mode destination. Either path unlocks discovery.
             </Text>
             <Pressable
               onPress={handleOpenLocationSetup}
@@ -1066,12 +1134,12 @@ export default function HomeScreen() {
             <Text className="mt-2 text-lg font-semibold text-white">
               {(feedQuery.error as Error)?.message?.includes('timed out')
                 ? 'Feed request timed out.'
-                : 'FastAPI feed is unavailable.'}
+                : 'Aventi discovery is temporarily unavailable.'}
             </Text>
             <Text className="mt-2 text-sm leading-5 text-white/70">
               {(feedQuery.error as Error)?.message?.includes('timed out')
-                ? 'The backend took too long to respond. Check if the server is running and reachable.'
-                : 'Start the backend (`pnpm backend:dev`) and ensure `EXPO_PUBLIC_API_BASE_URL` points to it.'}
+                ? 'The request took too long. Check your connection and try again.'
+                : 'Please try again in a moment.'}
             </Text>
             <Pressable
               onPress={() => feedQuery.refetch()}
@@ -1140,6 +1208,26 @@ export default function HomeScreen() {
             label={`Mining events in ${location.effectiveLocation?.city ?? 'your area'}...\nAuto-loading when ready`}
             showProgress={true}
           />
+        ) : feedQuery.data?.inventoryStatus === 'budget_paused' ? (
+          <GlassPanel>
+            <Text className="text-sm uppercase tracking-[2px] text-amber-200/80">Discovery paused</Text>
+            <Text className="mt-2 text-lg font-semibold text-white">Fresh event discovery is paused for this destination.</Text>
+            <Text className="mt-2 text-sm leading-5 text-white/70">Existing verified events will return when available{feedQuery.data.retryAt ? ` after ${new Date(feedQuery.data.retryAt).toLocaleString()}` : ' later'}.</Text>
+          </GlassPanel>
+        ) : feedQuery.data?.inventoryStatus === 'unavailable' ? (
+          <GlassPanel>
+            <Text className="text-sm uppercase tracking-[2px] text-rose-200/80">Temporarily unavailable</Text>
+            <Text className="mt-2 text-lg font-semibold text-white">Aventi could not load verified events right now.</Text>
+            <Text className="mt-2 text-sm leading-5 text-white/70">Your filters are saved. Retry when your connection is stable.</Text>
+            <Pressable onPress={() => void feedQuery.refetch()} className="mt-4 self-start rounded-full border border-white/15 bg-white/10 px-4 py-3"><Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white">Retry</Text></Pressable>
+          </GlassPanel>
+        ) : feedQuery.data?.inventoryStatus === 'unsupported' ? (
+          <GlassPanel>
+            <Text className="text-sm uppercase tracking-[2px] text-white/65">Destination unsupported</Text>
+            <Text className="mt-2 text-lg font-semibold text-white">Aventi does not cover this destination yet.</Text>
+            <Text className="mt-2 text-sm leading-5 text-white/70">Choose another supported US destination in Travel Discovery.</Text>
+            <Pressable onPress={() => router.push('/(tabs)/search')} className="mt-4 self-start rounded-full border border-white/15 bg-white/10 px-4 py-3"><Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white">Choose destination</Text></Pressable>
+          </GlassPanel>
         ) : feedQuery.data?.inventoryStatus === 'no_matches' ? (
           <GlassPanel>
             <Text className="text-sm uppercase tracking-[2px] text-white/65">No Matches</Text>
@@ -1205,9 +1293,11 @@ export default function HomeScreen() {
       </View>
 
       <EventDetailModal
+        destinationId={destinationId}
         event={detailEvent ?? activeEvent}
         visible={detailVisible}
         onClose={() => setDetailVisible(false)}
+        filters={filters}
       />
 
       <FilterSheet

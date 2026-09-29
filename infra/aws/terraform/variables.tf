@@ -165,3 +165,16 @@ variable "market_scan_max_markets" {
   description = "Max active markets the weekly scheduler will fan out per run."
   default     = 200
 }
+
+variable "cors_origins" {
+  type        = list(string)
+  description = "Explicit HTTPS web origins; never use wildcard in production."
+  validation {
+    condition     = length(var.cors_origins) > 0 && alltrue([for origin in var.cors_origins : startswith(origin, "https://")])
+    error_message = "Configure explicit HTTPS CORS origins."
+  }
+}
+variable "alert_emails" {
+  type        = list(string)
+  description = "Operators must confirm SNS subscriptions before launch."
+}

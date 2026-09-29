@@ -6,6 +6,7 @@
     "dev": "uv run --project . python -m aventi_backend.main",
     "worker": "uv run --project . python -m aventi_backend.worker.main",
     "lint": "uv run --project . ruff check src",
-    "typecheck": "uv run --project . mypy src"
+    "typecheck": "uv run --project . mypy src",
+    "test": "uv run --project . pytest"
   }
 }

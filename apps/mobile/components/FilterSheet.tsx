@@ -33,6 +33,11 @@ const PRICE_OPTIONS: { label: string; value: FeedFilters['price'] }[] = [
 ];
 
 const RADIUS_OPTIONS = [5, 10, 25, 50, 100];
+const AGE_OPTIONS: Array<{ label: string; value: NonNullable<FeedFilters['premiumAgeRestriction']> }> = [
+  { label: 'All ages', value: 'all' },
+  { label: '18+', value: '18+' },
+  { label: '21+', value: '21+' },
+];
 const VIBE_OPTIONS: { label: string; value: EventVibeTag }[] = [
   { label: 'Chill', value: 'chill' },
   { label: 'Energetic', value: 'energetic' },
@@ -79,6 +84,10 @@ export function FilterSheet({ visible, filters, onClose, onApply, isPremium }: P
 
   const handleRadiusChange = (radiusMiles: number) => {
     onApply({ ...filters, radiusMiles });
+  };
+
+  const handleAgeChange = (premiumAgeRestriction: NonNullable<FeedFilters['premiumAgeRestriction']>) => {
+    onApply({ ...filters, premiumAgeRestriction });
   };
 
   const toggleVibe = (vibe: EventVibeTag) => {
@@ -142,6 +151,20 @@ export function FilterSheet({ visible, filters, onClose, onApply, isPremium }: P
                       >
                         {option.label}
                       </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              <View className="mb-6">
+                <View className="mb-3 flex-row items-center gap-2">
+                  <Text className="text-[11px] uppercase tracking-[2px] text-white/50">Age</Text>
+                  {!canUseAdvancedFilters ? <Text className="text-[9px] uppercase tracking-[1px] text-[#A67CFF]">Premium</Text> : null}
+                </View>
+                <View className="flex-row gap-2">
+                  {AGE_OPTIONS.map((option) => (
+                    <Pressable key={option.value} disabled={!canUseAdvancedFilters} onPress={() => handleAgeChange(option.value)} className={`flex-1 rounded-full border px-3 py-2.5 ${filters.premiumAgeRestriction === option.value ? 'border-[#A67CFF] bg-[#A67CFF]/20' : 'border-white/15 bg-white/5'} ${canUseAdvancedFilters ? '' : 'opacity-40'}`}>
+                      <Text className="text-center text-xs text-white">{option.label}</Text>
                     </Pressable>
                   ))}
                 </View>

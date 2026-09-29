@@ -10,8 +10,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --emitDeclarationOnly",
-    "lint": "echo 'No lint configured for @aventi/api-client yet'",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "echo 'No tests for @aventi/api-client yet'"
+    "test": "tsx --test test/*.test.ts"
   }
 }
