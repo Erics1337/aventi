@@ -1,5 +1,9 @@
 -- Minimal Supabase-managed schemas for disposable CI PostgreSQL only.
 create schema if not exists extensions;
+-- The PostGIS CI image may preinstall PostGIS in public. Supabase exposes it
+-- from extensions, which the launch migration references explicitly.
+drop extension if exists postgis cascade;
+create extension postgis with schema extensions;
 create schema if not exists auth;
 create schema if not exists storage;
 do $$ begin
