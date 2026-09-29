@@ -112,3 +112,7 @@ The owner accepted Apple's updated developer agreement. App Store Connect now sh
 The signed-in Vercel team contains `crestcodecreative.com`, and Route 53 hosted zone `Z064752935D7KBXD6DB54` is authoritative for that unrelated domain. Aventi uses `aventi-web.vercel.app`. The owner confirmed `admin@crestcodecreative.com` as the Aventi support email. The Aventi Vercel project's Production `AVENTI_PRIVACY_URL` and `AVENTI_TERMS_URL` point to the stock-domain paths; `AVENTI_SUPPORT_EMAIL` is set. The direct policy pages do not depend on redirect variables.
 
 Google Play's Aventi store settings still showed `admin@aventi.app` and `https://aventi.app` on inspection. Correct values were entered into the contact editor, but the browser did not confirm saving them. Treat that Play metadata as outstanding until the saved values are read back. The app remains a draft.
+
+## Fresh CI database verification (2026-09-29 UTC)
+
+PR #15 contains the remaining launch implementation and is undergoing review. CI applied every forward migration to disposable PostgreSQL 17/PostGIS with a Supabase-schema fixture. Backend verification passed **103 tests**, including provider-budget concurrency and feed/job/database integration; Ruff and mypy passed. Frontend typecheck, lint, tests, and web/iOS/Android bundle builds passed. Terraform initialization, validation, and format checks passed with checksums for both Linux and macOS. These checks do not verify deployed Supabase grants, store billing, AWS worker delivery, or the device and operational acceptance list above.
