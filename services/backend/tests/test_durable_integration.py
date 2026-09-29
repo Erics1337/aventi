@@ -85,6 +85,11 @@ async def test_market_admission_caps_new_jobs_and_cooldown_replays(sessions, mon
         build_market_descriptor,
     )
 
+    async with sessions() as session:
+        await session.execute(text("delete from provider_daily_usage"))
+        await session.execute(text("delete from provider_monthly_usage"))
+        await session.commit()
+
     settings = Settings(
         _env_file=None,
         AVENTI_ENV="test",

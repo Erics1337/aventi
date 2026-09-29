@@ -42,6 +42,8 @@ async def test_insights_filter_pairings_and_revalidate_cached_cancellations():
     )
     try:
         async with factory() as session:
+            await session.execute(text("delete from provider_daily_usage"))
+            await session.execute(text("delete from provider_monthly_usage"))
             await PostgresAventiRepository(session).bootstrap_user(user, None)
             await session.execute(
                 text(
