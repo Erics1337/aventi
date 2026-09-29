@@ -1,5 +1,2 @@
-import { SavedPage } from '@/components/AventiWebApp';
-
-export default function Saved() {
-  return <SavedPage />;
-}
+import { redirect } from 'next/navigation';
+export default function Page(){ redirect('/download'); }

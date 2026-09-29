@@ -1,5 +1,2 @@
-import { ProfilePage } from '@/components/AventiWebApp';
-
-export default function Profile() {
-  return <ProfilePage />;
-}
+import { redirect } from 'next/navigation';
+export default function Page(){ redirect('/download'); }
