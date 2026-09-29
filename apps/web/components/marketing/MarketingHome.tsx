@@ -1,9 +1,9 @@
 'use client';
+import Link from 'next/link';
 
 import { useEffect, useState } from 'react';
 import {
   ArrowDown,
-  Bell,
   CalendarDays,
   Check,
   Compass,
@@ -12,8 +12,6 @@ import {
   LogOut,
   MapPin,
   Menu,
-  Music2,
-  Palette,
   Play,
   Share2,
   ShieldCheck,
@@ -21,20 +19,18 @@ import {
   User,
   X,
 } from 'lucide-react';
-import type { EventCard } from '@aventi/contracts';
 import { categoryLabels, demoEvents, heroImages, vibeLabels } from '@/lib/demo-data';
-import { formatEventTime, formatPrice } from '@/lib/format';
+import { formatPrice } from '@/lib/format';
 import { useAuthSession } from '@/lib/auth-session';
 import { isHttpUrl, useGetAppStoreHref } from '@/lib/mobile-store';
 import { AuthModal } from '../AuthModal';
-import { motion } from '../ui/app-ui';
 
 function LogoMark() {
   return (
-    <a className="inline-flex items-center gap-3 min-h-[42px] text-[0.78rem] font-bold uppercase tracking-[0.18em]" href="/" aria-label="Aventi home">
+    <Link className="inline-flex items-center gap-3 min-h-[42px] text-[0.78rem] font-bold uppercase tracking-[0.18em]" href="/" aria-label="Aventi home">
       <img src="/brand/icon.png" alt="" className="w-9 h-9 rounded-lg" />
       <span>Aventi</span>
-    </a>
+    </Link>
   );
 }
 
@@ -151,14 +147,6 @@ function NavMenu({
                   {auth.email}
                 </p>
               )}
-              <a
-                href="/profile"
-                className={`${linkBase} ${active === 'profile' ? linkActive : linkIdle}`}
-                onClick={onClose}
-              >
-                <User size={18} />
-                Profile
-              </a>
               {auth.isAdmin ? (
                 <a
                   href="/admin"
@@ -189,98 +177,6 @@ function NavMenu({
         </div>
       </div>
     </div>
-  );
-}
-
-function AppHeader({ active }: { active: 'home' | 'feed' | 'admin' | 'profile' }) {
-  const auth = useAuthSession();
-  const [mounted, setMounted] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  const navLink = (href: string, label: string, key: 'home' | 'feed' | 'admin') => (
-    <a
-      key={key}
-      className={`rounded-lg px-[10px] py-[9px] ${active === key ? 'bg-[rgba(25,83,57,0.12)] text-[#195339]' : 'text-[rgba(23,29,26,0.64)]'}`}
-      href={href}
-    >
-      {label}
-    </a>
-  );
-
-  const headerRight = (
-    <div className="flex items-center gap-[10px]">
-      <IconButton label="Notifications" variant="dark">
-        <Bell size={18} />
-      </IconButton>
-      <a
-        className="hidden sm:inline-flex border-0 rounded-lg items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[#f9d846] text-[#171d1a]"
-        href="/#pricing"
-      >
-        Get App
-      </a>
-      {/* Auth pill */}
-      {mounted ? (
-        auth.isAuthenticated ? (
-          <button
-            className="inline-flex items-center gap-2 rounded-lg border border-[rgba(23,29,26,0.14)] bg-[rgba(23,29,26,0.06)] px-3 h-[42px] text-[0.82rem] font-bold text-[#171d1a] hover:bg-[rgba(23,29,26,0.1)]"
-            type="button"
-            onClick={() => setMenuOpen(true)}
-            title={auth.email || 'Account'}
-          >
-            <User size={16} />
-            <span className="hidden sm:inline max-w-[120px] truncate">
-              {auth.email?.split('@')[0] ?? 'Account'}
-            </span>
-          </button>
-        ) : (
-          <button
-            className="inline-flex items-center gap-2 rounded-lg border border-[rgba(23,29,26,0.14)] bg-[rgba(23,29,26,0.06)] px-3 h-[42px] text-[0.82rem] font-bold text-[#171d1a] hover:bg-[rgba(23,29,26,0.1)]"
-            type="button"
-            onClick={() => auth.openAuthPrompt('welcome')}
-          >
-            <User size={16} />
-            <span className="hidden sm:inline">Sign In</span>
-          </button>
-        )
-      ) : (
-        <div className="w-[42px] h-[42px] rounded-lg border border-[rgba(23,29,26,0.14)] bg-[rgba(23,29,26,0.06)]" />
-      )}
-      {/* Hamburger — mobile only */}
-      <button
-        className="sm:hidden w-[42px] h-[42px] rounded-lg inline-grid place-items-center border border-[rgba(23,29,26,0.14)] bg-[rgba(23,29,26,0.06)] text-[#171d1a]"
-        type="button"
-        onClick={() => setMenuOpen(true)}
-        aria-label="Open menu"
-      >
-        <Menu size={19} />
-      </button>
-    </div>
-  );
-
-  return (
-    <>
-      <header className="sticky top-0 z-40 flex items-center justify-between gap-[18px] min-h-[72px] px-[clamp(16px,4vw,64px)] py-[14px] border-b border-[rgba(23,29,26,0.14)] bg-[rgba(241,241,241,0.92)] text-[#171d1a] backdrop-blur-[18px]">
-        <LogoMark />
-        <nav className="flex items-center gap-[clamp(12px,2vw,26px)] text-[0.82rem] font-bold" aria-label="App navigation">
-          {navLink('/', 'Home', 'home')}
-          {navLink('/feed', 'Event Feed', 'feed')}
-          {mounted && auth.isAdmin && navLink('/admin', 'Admin Portal', 'admin')}
-        </nav>
-        {headerRight}
-      </header>
-      {mounted && (
-        <NavMenu
-          open={menuOpen}
-          onClose={() => setMenuOpen(false)}
-          active={active}
-          theme="light"
-        />
-      )}
-    </>
   );
 }
 
@@ -352,7 +248,7 @@ function MarketingHero() {
           <a href="#product">Product</a>
           <a href="#how-it-works">How It Works</a>
           <a href="#premium">Premium</a>
-          <a href="/feed">Event Feed</a>
+          <a href="/download">Get the App</a>
           {mounted && auth.isAdmin ? (
             <a href="/admin" className="inline-flex items-center gap-1.5 text-[#f9d846]">
               <ShieldCheck size={14} />
@@ -361,9 +257,6 @@ function MarketingHero() {
           ) : null}
         </nav>
         <div className="flex items-center gap-[10px]">
-          <IconButton label="Notifications">
-            <Bell size={18} />
-          </IconButton>
           {mounted ? (
             auth.isAuthenticated ? (
               <button
@@ -414,9 +307,9 @@ function MarketingHero() {
           to. Tell Aventi your vibe, then scroll real events that fit your time, radius, budget, and mood.
         </p>
         <div className="flex flex-wrap items-center gap-3 mt-[30px]">
-          <a href="/feed" className="border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[#f9d846] text-[#171d1a]">
+          <a href="/download" className="border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[#f9d846] text-[#171d1a]">
             <Play size={18} />
-            Explore Events
+            Get the App
           </a>
           <a href="#how-it-works" className="border border-[rgba(241,241,241,0.17)] rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[rgba(241,241,241,0.08)] text-[#f1f1f1]">
             <Sparkles size={18} />
@@ -426,10 +319,10 @@ function MarketingHero() {
       </div>
       <div
         className="absolute right-[clamp(20px,4vw,64px)] bottom-7 z-[2] grid grid-cols-3 w-[min(520px,calc(100%-40px))] border border-[rgba(241,241,241,0.17)] bg-[rgba(23,29,26,0.72)] backdrop-blur-[18px]"
-        aria-label="Live operating metrics"
+        aria-label="Illustrative app preview"
       >
         <div className="p-[18px]">
-          <span className="text-[rgba(241,241,241,0.58)]">Next Up</span>
+          <span className="text-[rgba(241,241,241,0.58)]">Example event</span>
           <strong className="block mt-[6px] text-[1.55rem]">{heroEvent.title}</strong>
         </div>
         <div className="p-[18px]">
@@ -456,13 +349,13 @@ function MarketingProductSection() {
         <p className="text-[0.72rem] font-bold tracking-[0.16em] uppercase text-[#f9d846]">Member product</p>
         <h2 className="max-w-[760px] mt-[10px] mb-[18px] text-[clamp(2.5rem,7vw,6.3rem)] leading-[0.96]">Scroll until something feels worth leaving the house for.</h2>
         <p className="text-[rgba(23,29,26,0.62)] leading-[1.75]">
-          Aventi brings the mobile feed to web without losing the core interaction: one event at a time, fast preference
+          Aventi for iOS and Android helps you discover one event at a time, with fast preference
           signals, useful details close at hand, and a saved list for plans you actually want to make.
         </p>
         <div className="flex flex-wrap items-center gap-[18px] mt-[28px]">
-          <a className="border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[#f9d846] text-[#171d1a]" href="/feed">
+          <a className="border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[#f9d846] text-[#171d1a]" href="/download">
             <Compass size={18} />
-            Open Event Feed
+            Get the App
           </a>
           <a className="border-b-2 border-[rgba(25,83,57,0.28)] text-[#195339] font-extrabold" href="#premium">
             See Premium
@@ -625,9 +518,9 @@ function MarketingBeyondSection() {
           Aventi is built around the moment after discovery too: saved events, smarter calendars, friend-ready sharing,
           travel mode, and complete-the-night ideas that turn one good event into a real plan.
         </p>
-        <a className="mt-4 inline-flex border border-[rgba(241,241,241,0.17)] rounded-lg items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[rgba(241,241,241,0.08)] text-[#f1f1f1]" href="/feed">
+        <a className="mt-4 inline-flex border border-[rgba(241,241,241,0.17)] rounded-lg items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[rgba(241,241,241,0.08)] text-[#f1f1f1]" href="/download">
           <Compass size={18} />
-          Try The Feed
+          Get the App
         </a>
       </div>
       <div className="border border-[rgba(241,241,241,0.17)] rounded-lg p-[clamp(14px,2vw,22px)] bg-[linear-gradient(135deg,rgba(58,144,106,0.18),transparent),rgba(241,241,241,0.06)] shadow-[0_34px_90px_rgba(0,0,0,0.26)]" aria-label="Aventi planning features">
@@ -663,15 +556,15 @@ function PricingSection() {
             icon: <User size={22} />,
             title: 'Free Discovery',
             desc: 'Browse local events, save favorites, share plans, and teach the feed what kind of nights you want more of.',
-            features: ['Daily discovery feed', 'Saved events and favorites', 'Basic vibe and distance filters'],
-            cta: 'Launch Aventi',
+            features: ['10 preference actions per UTC day', 'Saved events and favorites', 'Vibe filters and a 10-mile radius'],
+            cta: 'Get the App',
           },
           {
             icon: <ShieldCheck size={22} />,
             title: 'Premium',
             desc: 'Unlock deeper search, trip planning, and AI context for people who want Aventi to become their city guide.',
             features: ['Unlimited swipes', 'Travel mode and advanced filters', 'Insider tips and complete-the-night ideas'],
-            cta: 'Explore Premium',
+            cta: 'View the App',
           },
         ].map((plan) => (
           <article key={plan.title} className="border border-[rgba(23,29,26,0.14)] rounded-lg bg-[rgba(255,255,255,0.48)] shadow-[0_24px_70px_rgba(23,29,26,0.2)] p-[clamp(22px,3vw,34px)]">
@@ -683,7 +576,7 @@ function PricingSection() {
                 <li key={f} className="relative pl-6 text-[rgba(23,29,26,0.66)] leading-[1.55] before:absolute before:left-0 before:top-[0.45em] before:w-2 before:h-2 before:rounded-full before:bg-[#3a906a] before:content-['']">{f}</li>
               ))}
             </ul>
-            <a href="/feed" className="mt-[14px] border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[#f9d846] text-[#171d1a]">{plan.cta}</a>
+            <a href="/download" className="mt-[14px] border-0 rounded-lg inline-flex items-center justify-center gap-[10px] min-h-[44px] px-[18px] font-bold bg-[#f9d846] text-[#171d1a]">{plan.cta}</a>
           </article>
         ))}
       </div>
@@ -704,7 +597,7 @@ export function MarketingHome() {
       <PricingSection />
       <footer className="flex items-center justify-between gap-[18px] px-[clamp(16px,4vw,64px)] py-6 border-t border-[rgba(23,29,26,0.14)]">
         <LogoMark />
-        <span className="text-[rgba(23,29,26,0.55)] text-[0.72rem] font-bold tracking-[0.16em] uppercase text-center">Built from the Aventi brand system: Poppins, matte tones, generous space, and calm confidence.</span>
+        <nav aria-label="Help and policies" className="flex flex-wrap gap-4"><Link href="/privacy">Privacy</Link><Link href="/terms">Terms</Link><Link href="/support">Support</Link><Link href="/delete-account">Delete account</Link></nav>
         <Check size={18} />
       </footer>
       <button
