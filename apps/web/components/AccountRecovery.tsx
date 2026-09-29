@@ -10,8 +10,12 @@ export function AccountRecovery() {
   useEffect(() => {
     let active=true;
     const {data:{subscription}}=supabase.auth.onAuthStateChange((event) => { if(active && event==='PASSWORD_RECOVERY') setReady(true); });
-    const code=new URL(window.location.href).searchParams.get('code');
-    if(code) void supabase.auth.exchangeCodeForSession(code).then(({error})=>{ if(active){setReady(!error);if(error)setMessage('Recovery link expired. Request a new one.');} window.history.replaceState({},'', '/recover'); });
+    const hadCode=new URL(window.location.href).searchParams.has('code');
+    void supabase.auth.getSession().then(({data,error})=>{
+      if (!active) return;
+      if (data.session) setReady(true);
+      else if (hadCode || error) setMessage('Recovery link expired. Request a new one.');
+    });
     return ()=>{active=false;subscription.unsubscribe();};
   },[]);
   async function submit(event:FormEvent){event.preventDefault();setBusy(true);try{

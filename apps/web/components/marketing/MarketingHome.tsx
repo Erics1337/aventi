@@ -80,7 +80,7 @@ function NavMenu({
 
   const navItems: { href: string; label: string; icon: React.ReactNode; key: string }[] = [
     { href: '/',       label: 'Home',         icon: <Compass size={18} />,     key: 'home' },
-    { href: '/feed',   label: 'Event Feed',   icon: <Sparkles size={18} />,    key: 'feed' },
+    { href: '/download', label: 'Get the app', icon: <Sparkles size={18} />, key: 'feed' },
   ];
 
   return (
