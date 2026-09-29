@@ -231,6 +231,7 @@ async def post_admin_import_markets_from_catalog(
     session: AsyncSession = db_session_dep,
 ) -> dict:
     summary = await MarketWarmupService(session).sync_market_inventory_from_event_venues()
+    await session.commit()
     return {"ok": True, **summary}
 
 
@@ -252,4 +253,5 @@ async def post_admin_markets_enqueue_scan(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    await session.commit()
     return {"ok": True, "jobId": job.id, "marketKey": body.market_key}

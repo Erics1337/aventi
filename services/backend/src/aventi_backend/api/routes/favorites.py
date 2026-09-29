@@ -1,5 +1,4 @@
-from fastapi import APIRouter, Depends
-from fastapi import HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from aventi_backend.core.auth import AuthenticatedUser, require_user
 from aventi_backend.db.deps import get_repository
@@ -24,8 +23,12 @@ async def save_favorite(
 ) -> dict:
     try:
         return await repo.save_favorite(user.id, event_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
 
 
 @router.delete("/favorites/{event_id}")
@@ -36,5 +39,9 @@ async def delete_favorite(
 ) -> dict:
     try:
         return await repo.delete_favorite(user.id, event_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=402, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc

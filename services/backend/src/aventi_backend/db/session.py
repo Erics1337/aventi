@@ -9,9 +9,7 @@ from aventi_backend.core.settings import get_settings
 _settings = get_settings()
 
 if _settings.database_url and _settings.database_url.startswith("postgresql://"):
-    raise RuntimeError(
-        "AVENTI_DATABASE_URL must use postgresql+asyncpg://, not postgresql://"
-    )
+    raise RuntimeError("AVENTI_DATABASE_URL must use postgresql+asyncpg://, not postgresql://")
 
 # Supabase's transaction-mode pooler (port 6543) multiplexes connections via
 # pgbouncer, which does NOT support prepared statements. asyncpg caches them

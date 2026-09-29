@@ -1,13 +1,10 @@
 'use client';
+import Link from 'next/link';
 
 import { useEffect, useState, type ReactNode } from 'react';
 import {
-  Compass,
-  Heart,
   Home,
   ShieldCheck,
-  SlidersHorizontal,
-  User,
   X,
   Smartphone,
 } from 'lucide-react';
@@ -28,10 +25,7 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { key: 'discovery', label: 'Discovery', href: '/feed', icon: <Compass size={20} strokeWidth={1.6} /> },
-  { key: 'filters', label: 'Filters', href: '/feed?filters=open', icon: <SlidersHorizontal size={20} strokeWidth={1.6} /> },
-  { key: 'saved', label: 'Saved', href: '/saved', icon: <Heart size={20} strokeWidth={1.6} /> },
-  { key: 'profile', label: 'Profile', href: '/profile', icon: <User size={20} strokeWidth={1.6} /> },
+  { key: 'profile', label: 'Get Aventi', href: '/download', icon: <Smartphone size={20} strokeWidth={1.6} /> },
   { key: 'admin', label: 'Admin Panel', href: '/admin', icon: <ShieldCheck size={20} strokeWidth={1.6} />, adminOnly: true },
 ];
 
@@ -88,7 +82,7 @@ function DownloadAppBanner({ onDismiss }: { onDismiss: () => void }) {
 
 function BackToWebsiteButton({ topOffset }: { topOffset: number }) {
   return (
-    <a
+    <Link
       href="/"
       aria-label="Exit to Aventi website"
       title="Back to Aventi website"
@@ -96,7 +90,7 @@ function BackToWebsiteButton({ topOffset }: { topOffset: number }) {
       style={{ top: `${topOffset + 16}px` }}
     >
       <Home size={18} strokeWidth={1.6} />
-    </a>
+    </Link>
   );
 }
 

@@ -17,11 +17,15 @@ async def post_swipe(
     repo: AventiRepository = Depends(get_repository),
 ) -> dict:
     try:
-        return await repo.record_swipe(user_id=user.id, email=user.email, payload=payload, settings=settings)
+        return await repo.record_swipe(
+            user_id=user.id, email=user.email, payload=payload, settings=settings
+        )
     except PermissionError as exc:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail=str(exc),
         ) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc

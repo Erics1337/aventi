@@ -9,15 +9,15 @@ AWS_REGION    ?= us-east-1
 IMAGE_TAG     ?= $(shell git rev-parse --short HEAD)
 
 # Derived
-AWS_ACCOUNT_ID := $(shell aws sts get-caller-identity --query Account --output text 2>/dev/null)
-ECR_BASE       := $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
+AWS_ACCOUNT_ID = $(shell aws sts get-caller-identity --query Account --output text 2>/dev/null)
+ECR_BASE       = $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
 # Single consolidated repo — serves api, worker, and scheduler Lambdas.
 # Keeping the -worker suffix preserves the existing ECR + avoids a migration.
-ECR_BACKEND    := $(ECR_BASE)/$(PROJECT)-$(ENV)-worker
+ECR_BACKEND    = $(ECR_BASE)/$(PROJECT)-$(ENV)-worker
 WORKER_FN      := $(PROJECT)-$(ENV)-worker
 API_FN         := $(PROJECT)-$(ENV)-api
 SCHEDULER_FN   := $(PROJECT)-$(ENV)-scheduler
-RULE_NAME      := $(PROJECT)-$(ENV)-weekly-city-scan
+RULE_NAME      := $(PROJECT)-$(ENV)-weekly-market-scan
 
 TF_DIR := infra/aws/terraform
 
@@ -37,10 +37,17 @@ help: ## show available targets
 	  $(MAKEFILE_LIST)
 
 ## ------- Full pipelines ----------------------------------------------------
-deploy: migrate build push tf-apply smoke ## full deploy: migrate DB -> build -> push -> terraform -> smoke test
+deploy: ## migrate the selected remote database and deploy a pinned release
+	$(MAKE) release-check
+	$(MAKE) migrate-remote
+	$(MAKE) build
+	$(MAKE) push
+	$(MAKE) tf-apply
+	$(MAKE) runtime-secret-sync
+	$(MAKE) smoke
 	@echo "✅ deploy complete (tag=$(IMAGE_TAG))"
 
-deploy-quick: build push tf-apply ## skip migrate + smoke (just redeploy code)
+deploy-quick: deploy ## alias for the fully checked release pipeline
 
 ## ------- Step 1: Supabase migrations ---------------------------------------
 migrate: ## apply pending migrations to LOCAL supabase stack
@@ -70,19 +77,18 @@ build: ## build the shared backend container image (linux/amd64 for Lambda)
 	docker build \
 	  --platform linux/amd64 \
 	  -t $(ECR_BACKEND):$(IMAGE_TAG) \
-	  -t $(ECR_BACKEND):latest \
 	  -f services/backend/Dockerfile \
 	  services/backend
 
 push: ecr-login ## push backend image to the consolidated ECR
 	docker push $(ECR_BACKEND):$(IMAGE_TAG)
-	docker push $(ECR_BACKEND):latest
 	@echo "✅ pushed $(ECR_BACKEND):$(IMAGE_TAG) (serves api, worker, scheduler)"
 
 ## ------- Step 3: Terraform -------------------------------------------------
 tf-plan: ## terraform plan (uses current IMAGE_TAG)
-	cd $(TF_DIR) && terraform init -upgrade && \
+	cd $(TF_DIR) && terraform init -lockfile=readonly && \
 	  terraform plan \
+	    -var "environment=$(ENV)" \
 	    -var "worker_image_tag=$(IMAGE_TAG)" \
 	    -var "api_image_tag=$(IMAGE_TAG)" \
 	    -out=tfplan
@@ -92,17 +98,11 @@ tf-apply: tf-plan ## terraform apply (auto-plan first)
 
 runtime-secret-sync: ## sync backend runtime config from local env file into AWS Secrets Manager
 	bash scripts/sync-runtime-secret.sh
+	uv run --project services/backend python scripts/refresh-runtime.py
 
 ## ------- Step 4: Smoke test + observability --------------------------------
-smoke: ## invoke scheduler Lambda with limit=10 and print the response
-	aws lambda invoke \
-	  --function-name $(SCHEDULER_FN) \
-	  --region $(AWS_REGION) \
-	  --cli-binary-format raw-in-base64-out \
-	  --payload '{"limit": 10}' \
-	  /tmp/$(SCHEDULER_FN)-out.json >/dev/null
-	@echo "--- scheduler response ---"
-	@cat /tmp/$(SCHEDULER_FN)-out.json && echo
+smoke: ## verify API plus durable outbox/SQS/worker completion
+	python3 scripts/smoke.py
 
 logs: ## tail worker Lambda logs (Ctrl-C to stop)
 	aws logs tail /aws/lambda/$(WORKER_FN) --follow --region $(AWS_REGION)
@@ -157,3 +157,6 @@ rollback-api: ## point api Lambda at a previous image tag (TAG=<sha>)
 	  --image-uri $(ECR_BACKEND):$(TAG) \
 	  --region $(AWS_REGION)
 	@echo "⏪ api rolled back to $(TAG)"
+
+release-check: ## validate owner-provided production configuration without printing secrets
+	python3 scripts/release_check.py

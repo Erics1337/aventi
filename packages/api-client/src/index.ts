@@ -3,21 +3,37 @@ import type {
   AdminEnqueueMarketScanResponse,
   AdminImportMarketsCatalogResponse,
   AdminUserLocationsResponse,
+  AccountDeletionStatus,
+  DestinationsResponse,
+  EventInsights,
   FeedImpressionPayload,
   FeedRequest,
   FeedResponse,
   FavoritesResponse,
   MeProfile,
   MembershipEntitlements,
+  MembershipReconcilePayload,
+  MembershipReconcileResponse,
   ProfileLocationPayload,
   ReportReason,
   SwipePayload,
+  SwipeResponse,
   UserPreferences,
 } from '@aventi/contracts';
 
 export interface AventiApiClientOptions {
   baseUrl: string;
   getAccessToken?: () => Promise<string | null> | string | null;
+}
+
+export class AventiApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly body?: unknown,
+  ) {
+    super(`Aventi API error ${status}`);
+    this.name = 'AventiApiError';
+  }
 }
 
 export class AventiApiClient {
@@ -35,7 +51,13 @@ export class AventiApiClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Aventi API error ${response.status}`);
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        body = undefined;
+      }
+      throw new AventiApiError(response.status, body);
     }
 
     if (response.status === 204) {
@@ -83,9 +105,16 @@ export class AventiApiClient {
       ...(payload.marketCity ? { marketCity: payload.marketCity } : {}),
       ...(payload.marketState ? { marketState: payload.marketState } : {}),
       ...(payload.marketCountry ? { marketCountry: payload.marketCountry } : {}),
+      ...(payload.destinationId ? { destinationId: payload.destinationId } : {}),
+      ...(payload.filters.startDate ? { startDate: payload.filters.startDate } : {}),
+      ...(payload.filters.endDate ? { endDate: payload.filters.endDate } : {}),
+      ...(payload.filters.query ? { query: payload.filters.query } : {}),
       ...(payload.filters.timeOfDay ? { timeOfDay: payload.filters.timeOfDay } : {}),
       ...(payload.filters.price ? { price: payload.filters.price } : {}),
       ...(payload.filters.radiusMiles ? { radiusMiles: String(payload.filters.radiusMiles) } : {}),
+      ...(payload.filters.premiumAgeRestriction
+        ? { premiumAgeRestriction: payload.filters.premiumAgeRestriction }
+        : {}),
       ...(payload.cursor ? { cursor: payload.cursor } : {}),
     });
     for (const vibe of payload.filters.vibes ?? []) {
@@ -104,13 +133,10 @@ export class AventiApiClient {
     });
   }
 
-  postSwipe(payload: SwipePayload) {
-    return this.request<{
-      accepted: true;
-      remainingFreeSwipes?: number;
-      remainingFreePreferenceActions?: number;
-    }>(`/v1/swipes`, {
+  postSwipe(payload: SwipePayload, accessToken?: string) {
+    return this.request<SwipeResponse>(`/v1/swipes`, {
       method: 'POST',
+      ...(accessToken ? { headers: { Authorization: `Bearer ${accessToken}` } } : {}),
       body: JSON.stringify(payload),
     });
   }
@@ -153,6 +179,44 @@ export class AventiApiClient {
 
   getEntitlements() {
     return this.request<MembershipEntitlements>(`/v1/membership/entitlements`);
+  }
+
+  getMembershipProducts() {
+    return this.request<{ purchasesEnabled: boolean; products: Array<{ period: 'monthly' | 'annual'; productId: string }> }>('/v1/membership/products');
+  }
+
+  reconcileMembership(payload: MembershipReconcilePayload) {
+    return this.request<MembershipReconcileResponse>(`/v1/membership/reconcile`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  searchDestinations(query: string) {
+    const search = new URLSearchParams({ q: query });
+    return this.request<DestinationsResponse>(`/v1/destinations?${search.toString()}`);
+  }
+
+  getEventInsights(eventId: string, context?: Pick<FeedRequest['filters'], 'radiusMiles' | 'startDate' | 'endDate' | 'premiumAgeRestriction' | 'categories' | 'vibes'> & { destinationId?: string }) {
+    const search = new URLSearchParams({
+      ...(context?.radiusMiles ? { radiusMiles: String(context.radiusMiles) } : {}),
+      ...(context?.destinationId ? { destinationId: context.destinationId } : {}),
+      ...(context?.startDate ? { startDate: context.startDate } : {}),
+      ...(context?.endDate ? { endDate: context.endDate } : {}),
+      ...(context?.premiumAgeRestriction ? { ageRestriction: context.premiumAgeRestriction } : {}),
+    });
+    for (const category of context?.categories ?? []) search.append('categories', category);
+    for (const vibe of context?.vibes ?? []) search.append('vibes', vibe);
+    const suffix = search.size > 0 ? `?${search.toString()}` : '';
+    return this.request<EventInsights>(`/v1/events/${encodeURIComponent(eventId)}/insights${suffix}`);
+  }
+
+  requestAccountDeletion() {
+    return this.request<AccountDeletionStatus>(`/v1/me`, { method: 'DELETE' });
+  }
+
+  getAccountDeletionStatus() {
+    return this.request<AccountDeletionStatus>(`/v1/me/deletion`);
   }
 
   getAdminDashboard() {

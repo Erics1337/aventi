@@ -26,6 +26,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "pytest>=8.3,<9",
+  "pytest-asyncio>=0.24,<1",
   "httpx>=0.28.0,<1.0.0",
   "ruff>=0.8.0,<1.0.0",
   "mypy>=1.13.0,<2.0.0"
@@ -44,11 +46,20 @@ src = ["src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = false
 warn_unused_configs = true
+ignore_missing_imports = true
 
 [dependency-groups]
 dev = []
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

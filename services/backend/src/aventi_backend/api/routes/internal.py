@@ -9,8 +9,7 @@ from aventi_backend.core.auth import require_internal_api_key
 from aventi_backend.core.settings import get_settings
 from aventi_backend.db.session import get_db_session
 from aventi_backend.services.ingest import ManualIngestService
-from aventi_backend.services.jobs import JobType
-from aventi_backend.services.jobs import JobQueueRepository
+from aventi_backend.services.jobs import JobQueueRepository, JobType
 from aventi_backend.services.verification import VerificationService
 
 router = APIRouter(dependencies=[Depends(require_internal_api_key)])
@@ -43,7 +42,10 @@ async def enqueue_job(
             payload.type, payload.payload, max_attempts=payload.max_attempts
         )
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+    await session.commit()
     return {
         "ok": True,
         "job": {
@@ -69,16 +71,27 @@ async def ingest_manual(
         )
         verification_jobs_enqueued = 0
         settings = get_settings()
-        if settings.enable_verification and payload.enqueue_verification_jobs and ingest_summary.event_ids:
-            verification_jobs_enqueued = await VerificationService(session).enqueue_verification_jobs(
+        if (
+            settings.enable_verification
+            and payload.enqueue_verification_jobs
+            and ingest_summary.event_ids
+        ):
+            verification_jobs_enqueued = await VerificationService(
+                session
+            ).enqueue_verification_jobs(
                 limit=len(ingest_summary.event_ids),
                 event_ids=ingest_summary.event_ids,
             )
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
 
+    await session.commit()
     response = ingest_summary.as_dict()
     response["verificationJobsEnqueued"] = verification_jobs_enqueued
     return response
@@ -95,16 +108,21 @@ async def reset_seen_events(
         if user_id:
             result = await session.execute(
                 text("delete from public.feed_impressions where user_id = :user_id"),
-                {"user_id": user_id}
+                {"user_id": user_id},
             )
             await session.commit()
-            return {"message": f"Reset seen events for user {user_id}", "deleted": result.rowcount}
+            return {
+                "message": f"Reset seen events for user {user_id}",
+                "deleted": getattr(result, "rowcount", 0),
+            }
         else:
             result = await session.execute(text("delete from public.feed_impressions"))
             await session.commit()
-            return {"message": "Reset all seen events", "deleted": result.rowcount}
+            return {"message": "Reset all seen events", "deleted": getattr(result, "rowcount", 0)}
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
 
 
 @router.post("/verification/run")
@@ -115,5 +133,15 @@ async def run_verification(
     try:
         enqueued = await VerificationService(session).enqueue_verification_jobs(limit=payload.limit)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+        ) from exc
+    await session.commit()
     return {"ok": True, "requested": payload.limit, "enqueued": enqueued}
+
+@router.get("/jobs/{job_id}")
+async def job_status(job_id: str, session: AsyncSession = Depends(get_db_session)) -> dict:
+    row = (await session.execute(text("select id,status,result,created_at,completed_at from public.jobs where id=:id"),{"id":job_id})).mappings().first()
+    if not row:
+        raise HTTPException(404,"Job not found")
+    return dict(row)

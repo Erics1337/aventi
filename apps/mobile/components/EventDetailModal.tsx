@@ -2,13 +2,18 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Linking, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import type { EventCard } from '@aventi/contracts';
+import type { EventCard, FeedFilters } from '@aventi/contracts';
 import { categoryGradients } from '@aventi/design-tokens';
+import { useQuery } from '@tanstack/react-query';
+import { aventiApi } from '../lib/api';
+import { AventiApiError } from '@aventi/api-client';
 
 interface Props {
   event: EventCard | null;
   visible: boolean;
   onClose: () => void;
+  filters?: FeedFilters;
+  destinationId?: string;
 }
 
 function formatDateTime(iso: string): string {
@@ -57,7 +62,15 @@ function formatPrice(event: EventCard): string {
   return 'Check venue';
 }
 
-export function EventDetailModal({ event, visible, onClose }: Props) {
+export function EventDetailModal({ event, visible, onClose, filters, destinationId }: Props) {
+  const insights = useQuery({
+    queryKey: ['event-insights', event?.id, destinationId, filters?.radiusMiles, filters?.startDate, filters?.endDate, filters?.premiumAgeRestriction, (filters?.categories ?? []).join(','), (filters?.vibes ?? []).join(',')],
+    enabled: visible && Boolean(event?.id),
+    queryFn: () => aventiApi.getEventInsights(event!.id, { ...filters, destinationId }),
+    staleTime: 10 * 60_000,
+    refetchInterval: (query) => query.state.data?.status === 'pending' ? 5_000 : false,
+  });
+
   if (!event) return null;
 
   const gradient = categoryGradients[event.category] ?? categoryGradients.experiences;
@@ -125,6 +138,26 @@ export function EventDetailModal({ event, visible, onClose }: Props) {
                   {event.description}
                 </Text>
               ) : null}
+
+              <View className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+                <View className="flex-row items-center gap-2">
+                  <Ionicons name="shield-checkmark" size={16} color="#A67CFF" />
+                  <Text className="text-[11px] uppercase tracking-[2px] text-white/60">AI-generated insights</Text>
+                </View>
+                {insights.data?.status === 'ready' ? (
+                  <View className="mt-2 gap-2">
+                    {insights.data.insight?.summary ? <Text className="text-sm leading-5 text-white/80">{insights.data.insight.summary}</Text> : null}
+                    {insights.data.insight?.insiderTips.map((highlight) => <Text key={highlight} className="text-xs leading-5 text-white/65">• {highlight}</Text>)}
+                    {insights.data.insight?.compatibleEvents?.map(pair => <Pressable key={pair.eventId} disabled={!pair.bookingUrl} onPress={() => pair.bookingUrl && void Linking.openURL(pair.bookingUrl)}><Text className="text-sm text-[#A67CFF]">Pair with {pair.title} ↗</Text><Text className="text-xs text-white/60">{pair.venueName}{pair.startsAt ? ` · ${formatDateTime(pair.startsAt)}` : ''}</Text></Pressable>)}
+                    {insights.data.insight?.sources.map((source) => <Pressable key={source.url} onPress={() => void Linking.openURL(source.url)}><Text className="text-xs text-[#A67CFF]">{source.label} ↗</Text></Pressable>)}
+                    {insights.data.generatedAt ? <Text className="text-[10px] uppercase tracking-[1px] text-white/35">Generated {new Date(insights.data.generatedAt).toLocaleDateString()}</Text> : null}
+                  </View>
+                ) : insights.isError || insights.data?.status === 'unavailable' ? (
+                  <Text className="mt-2 text-xs leading-5 text-white/50">{insights.error instanceof AventiApiError && insights.error.status === 403 ? 'Unlimited unlocks verified event insights.' : 'Verified insights are unavailable for this event.'}</Text>
+                ) : (
+                  <Text className="mt-2 text-xs leading-5 text-white/50">Checking current event sources…</Text>
+                )}
+              </View>
 
               {/* Detail rows */}
               <View className="p-4 mt-5 rounded-2xl border border-white/8 bg-white/3">

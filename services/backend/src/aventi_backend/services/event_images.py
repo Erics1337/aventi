@@ -3,12 +3,13 @@ from __future__ import annotations
 import re
 from typing import Any
 
-
 MANAGED_IMAGE_SOURCES = frozenset({"opengraph", "pollinations", "supabase_storage"})
 REPLACEABLE_DISCOVERY_SOURCES = frozenset({"serpapi", "google-events"})
 
 
-def infer_image_source(image_url: str | None, discovery_source_type: str | None = None) -> str | None:
+def infer_image_source(
+    image_url: str | None, discovery_source_type: str | None = None
+) -> str | None:
     if image_url:
         lowered = image_url.lower()
         if "image.pollinations.ai/" in lowered:
@@ -32,9 +33,7 @@ def should_generate_main_image(
 ) -> bool:
     metadata = metadata if isinstance(metadata, dict) else {}
     image_source = str(metadata.get("imageSource") or "").strip().lower()
-    discovery_source = str(
-        metadata.get("sourceType") or incoming_source_type or ""
-    ).strip().lower()
+    discovery_source = str(metadata.get("sourceType") or incoming_source_type or "").strip().lower()
 
     if image_source in MANAGED_IMAGE_SOURCES:
         return False
@@ -52,8 +51,7 @@ def is_managed_event_image_url(image_url: str | None) -> bool:
         return False
     lowered = image_url.lower()
     return (
-        "image.pollinations.ai/" in lowered
-        or "/storage/v1/object/public/event-images/" in lowered
+        "image.pollinations.ai/" in lowered or "/storage/v1/object/public/event-images/" in lowered
     )
 
 

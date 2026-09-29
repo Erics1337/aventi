@@ -120,7 +120,7 @@ export function AuthSheet() {
   const [password, setPassword] = useState('');
   const [errorText, setErrorText] = useState<string | null>(null);
   const [noticeText, setNoticeText] = useState<string | null>(null);
-  const [submitTask, setSubmitTask] = useState<'signin' | 'signup' | 'guest' | null>(null);
+  const [submitTask, setSubmitTask] = useState<'signin' | 'signup' | 'guest' | 'recovery' | null>(null);
   const opacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -176,6 +176,38 @@ export function AuthSheet() {
         setNoticeText(auth.isAnonymousUser ? 'Guest profile upgraded. Check your email if confirmation is enabled.' : 'Check your email to confirm your account, then sign in.');
         setFormMode('signin');
       }
+    } catch (error) {
+      setErrorText(formatAuthError(error));
+    } finally {
+      setSubmitTask(null);
+    }
+  };
+
+  const handleRecovery = async () => {
+    if (auth.passwordRecoveryPending) {
+      if (password.length < 6) {
+        setErrorText('Enter a new password with at least 6 characters.');
+        return;
+      }
+      setSubmitTask('recovery');
+      try {
+        await auth.updateRecoveredPassword(password);
+        setNoticeText('Your password has been updated.');
+      } catch (error) {
+        setErrorText(formatAuthError(error));
+      } finally {
+        setSubmitTask(null);
+      }
+      return;
+    }
+    if (!email.trim()) {
+      setErrorText('Enter your email first.');
+      return;
+    }
+    setSubmitTask('recovery');
+    try {
+      await auth.requestPasswordRecovery(email.trim());
+      setNoticeText('Check your email for the secure password reset link.');
     } catch (error) {
       setErrorText(formatAuthError(error));
     } finally {
@@ -259,10 +291,17 @@ export function AuthSheet() {
                 secureTextEntry
                 autoCapitalize="none"
                 autoComplete={formMode === 'signin' ? 'current-password' : 'new-password'}
-                placeholder={formMode === 'signin' ? 'Password' : 'Password (min 6+)'}
+                placeholder={auth.passwordRecoveryPending ? 'New password (min 6+)' : formMode === 'signin' ? 'Password' : 'Password (min 6+)'}
                 placeholderTextColor="rgba(255,255,255,0.4)"
                 className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white"
               />
+              {formMode === 'signin' ? (
+                <Pressable onPress={() => void handleRecovery()} disabled={submitTask === 'recovery'} className="self-start py-1">
+                  <Text className="text-xs text-white/65">
+                    {auth.passwordRecoveryPending ? 'Set new password' : 'Forgot password? Email a reset link'}
+                  </Text>
+                </Pressable>
+              ) : null}
               {auth.isAnonymousUser ? (
                 <Text className="text-xs leading-5 text-white/60">
                   You are in a temporary guest session. Create Account upgrades this session. Sign In switches to an existing profile instead.
