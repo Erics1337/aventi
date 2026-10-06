@@ -1,50 +1,76 @@
 name: CI
-
 on:
   push:
     branches: [main, master, 'codex/**']
   pull_request:
-
+permissions:
+  contents: read
 jobs:
-  monorepo-checks:
+  frontend:
     runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
+      NEXT_PUBLIC_API_BASE_URL: https://api.example.com
+      EXPO_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
+      EXPO_PUBLIC_API_BASE_URL: https://api.example.com
+      EXPO_PUBLIC_WEB_URL: https://example.com
+      EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: appl_ci_placeholder
+      EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY: goog_ci_placeholder
+      EAS_BUILD_PROFILE: production
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
         with:
           version: 10.13.1
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-
-      - name: Install JS dependencies
-        run: pnpm install --frozen-lockfile=false
-
-      - name: JS typecheck (scaffold)
-        run: pnpm typecheck || true
-
-  backend-checks:
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec turbo run typecheck lint test --filter='!@aventi/backend'
+      - run: pnpm --filter @aventi/mobile exec node scripts/verify-native-config.cjs
+      - run: pnpm --filter @aventi/web build
+      - run: pnpm --filter @aventi/mobile exec expo export --platform ios
+      - run: pnpm --filter @aventi/mobile exec expo export --platform android
+  backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:17-3.5
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: aventi_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      AVENTI_ENV: test
+      AVENTI_TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/aventi_test
+      PGPASSWORD: postgres
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-
-      - name: Sync backend dependencies
-        run: uv sync --project services/backend --extra dev
-
-      - name: Run backend tests (scaffold)
-        run: uv run --project services/backend pytest || true
+      - uses: astral-sh/setup-uv@v4
+      - run: uv sync --project services/backend --extra dev --frozen
+      - name: Apply all migrations to a fresh database
+        run: |
+          psql -h localhost -U postgres -d aventi_test -v ON_ERROR_STOP=1 -f services/backend/tests/database_bootstrap.sql
+          for migration in supabase/migrations/*.sql; do
+            psql -h localhost -U postgres -d aventi_test -v ON_ERROR_STOP=1 -f "$migration" || exit 1
+          done
+      - run: uv run --project services/backend ruff check services/backend/src services/backend/tests
+      - run: uv run --project services/backend mypy --config-file services/backend/pyproject.toml services/backend/src
+      - run: uv run --project services/backend pytest services/backend/tests
+  infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform -chdir=infra/aws/terraform init -backend=false -lockfile=readonly
+      - run: terraform -chdir=infra/aws/terraform validate
+      - run: terraform -chdir=infra/aws/terraform fmt -check

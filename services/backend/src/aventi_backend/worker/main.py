@@ -1,21 +1,20 @@
 import asyncio
-import socket
 import json
-from datetime import UTC, datetime
+import socket
 from typing import NoReturn
 from urllib.parse import urlparse
 
 import boto3
-from botocore.exceptions import ClientError, EndpointConnectionError
-
 import structlog
+from botocore.exceptions import ClientError, EndpointConnectionError
 from watchfiles import run_process
 from watchfiles.filters import PythonFilter
 
 from aventi_backend.core.logging import configure_logging
-from aventi_backend.core.settings import get_settings, Settings
+from aventi_backend.core.settings import Settings, get_settings
 from aventi_backend.db.session import open_db_session
-from aventi_backend.services.jobs import JobRecord, JobType
+from aventi_backend.services.budgets import BudgetError
+from aventi_backend.services.jobs import JobQueueRepository, JobType
 from aventi_backend.worker.handlers import process_job
 
 logger = structlog.get_logger(__name__)
@@ -86,11 +85,15 @@ async def _ensure_queue_exists(settings: Settings) -> boto3.client:
                     "worker.queue.not_found_production",
                     queue_url=settings.sqs_worker_queue_url,
                     env=settings.env,
-                    error="Queue auto-creation disabled in production"
+                    error="Queue auto-creation disabled in production",
                 )
                 raise
             queue_name = _extract_queue_name_from_url(settings.sqs_worker_queue_url)
-            logger.info("worker.queue.creating", queue_name=queue_name, queue_url=settings.sqs_worker_queue_url)
+            logger.info(
+                "worker.queue.creating",
+                queue_name=queue_name,
+                queue_url=settings.sqs_worker_queue_url,
+            )
             try:
                 await asyncio.to_thread(
                     sqs_client.create_queue,
@@ -100,7 +103,9 @@ async def _ensure_queue_exists(settings: Settings) -> boto3.client:
             except EndpointConnectionError as exc:
                 _exit_sqs_unreachable(settings, exc)
             except ClientError as create_exc:
-                logger.error("worker.queue.create_failed", queue_name=queue_name, error=str(create_exc))
+                logger.error(
+                    "worker.queue.create_failed", queue_name=queue_name, error=str(create_exc)
+                )
                 raise
         else:
             raise
@@ -131,7 +136,7 @@ async def worker_loop() -> None:
                     QueueUrl=settings.sqs_worker_queue_url,
                     MaxNumberOfMessages=1,
                     WaitTimeSeconds=20,
-                    VisibilityTimeout=300, # 5 minutes before message becomes visible again
+                    VisibilityTimeout=900,
                     AttributeNames=["ApproximateReceiveCount"],
                 )
 
@@ -152,40 +157,48 @@ async def worker_loop() -> None:
                         if not job_type_str:
                             raise ValueError("job_type missing")
                         job_type = JobType(job_type_str)
-                        payload = body.get("payload", {})
-                        attempts = int(message.get("Attributes", {}).get("ApproximateReceiveCount", body.get("attempts", 0)))
-                        max_attempts = body.get("max_attempts", 5)
-
-                        job = JobRecord(
-                            id=job_id,
-                            type=job_type,
-                            payload=payload,
-                            run_at=datetime.now(tz=UTC),
-                            attempts=attempts,
-                            max_attempts=max_attempts,
+                        attempts = int(
+                            message.get("Attributes", {}).get(
+                                "ApproximateReceiveCount", body.get("attempts", 0)
+                            )
                         )
+                        max_attempts = body.get("max_attempts", 5)
 
                         logger.info(
                             "worker.job.claimed",
-                            job_id=job.id,
-                            job_type=job.type,
-                            attempts=job.attempts,
-                            max_attempts=job.max_attempts,
+                            job_id=job_id,
+                            job_type=job_type,
+                            attempts=attempts,
+                            max_attempts=max_attempts,
                         )
                     except Exception as exe:
                         logger.error("worker.job.malformed", body=raw_body, error=str(exe))
-                        # If malformed, delete it to not poison queue
-                        await asyncio.to_thread(
-                            sqs_client.delete_message,
-                            QueueUrl=settings.sqs_worker_queue_url,
-                            ReceiptHandle=receipt_handle,
-                        )
                         continue
 
                     # Execute the job context
                     async with open_db_session() as session:
+                        repo = JobQueueRepository(session)
+                        claim = await repo.claim_job(job_id, worker_id=worker_name)
+                        if claim.outcome != "claimed" or claim.job is None:
+                            if claim.outcome == "completed":
+                                await asyncio.to_thread(
+                                    sqs_client.delete_message,
+                                    QueueUrl=settings.sqs_worker_queue_url,
+                                    ReceiptHandle=receipt_handle,
+                                )
+                            logger.info(
+                                "worker.job.duplicate", job_id=job_id, outcome=claim.outcome
+                            )
+                            continue
+                        job = claim.job
                         try:
                             result = await process_job(job, session)
+                            completed = await repo.complete_job(
+                                job.id, worker_id=worker_name, result=result
+                            )
+                            if not completed:
+                                logger.warning("worker.job.lease_lost", job_id=job.id)
+                                continue
                             # On success, delete message from SQS
                             await asyncio.to_thread(
                                 sqs_client.delete_message,
@@ -201,10 +214,28 @@ async def worker_loop() -> None:
                         except (asyncio.CancelledError, KeyboardInterrupt):
                             logger.info("worker.job.interrupted", job_id=job.id, job_type=job.type)
                             raise
+                        except BudgetError as exc:
+                            result = {"skipped": True, "reason": type(exc).__name__}
+                            completed = await repo.complete_job(
+                                job.id, worker_id=worker_name, result=result
+                            )
+                            if completed:
+                                await asyncio.to_thread(
+                                    sqs_client.delete_message,
+                                    QueueUrl=settings.sqs_worker_queue_url,
+                                    ReceiptHandle=receipt_handle,
+                                )
+                            logger.info("worker.job.budget_skipped", job_id=job.id, error=str(exc))
                         except Exception as exc:  # noqa: BLE001
-                            # We let SQS default redelivery visibility timeout handle failures.
-                            # Just log it for now
-                            logger.exception("worker.job.failed", job_id=job.id, job_type=job.type, error=str(exc))
+                            await session.rollback()
+                            lease_owned = await repo.fail_job(job.id, exc, worker_id=worker_name)
+                            logger.exception(
+                                "worker.job.failed",
+                                job_id=job.id,
+                                job_type=job.type,
+                                lease_owned=lease_owned,
+                                error=str(exc),
+                            )
 
             except RuntimeError as exc:
                 logger.error("worker.misconfigured", error=str(exc))

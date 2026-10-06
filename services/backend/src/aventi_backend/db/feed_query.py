@@ -1,18 +1,22 @@
 """Feed query builder and filtering utilities."""
+
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
+from typing import Any, get_args
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from aventi_backend.models.schemas import EventCategory, EventVibeTag
 
 
 @dataclass
 class FeedQueryResult:
     """Result of a feed query with metadata for filtering."""
+
     rows: list[dict[str, Any]]
     tag_map: dict[str, list[str]]
     ticket_map: dict[str, list[dict[str, Any]]]
@@ -22,16 +26,14 @@ class FeedQueryResult:
 @dataclass
 class FeedFilterContext:
     """Context for client-side filtering of feed results."""
+
     user_latitude: float
     user_longitude: float
     radius_miles: float | None = None
     time_of_day: str | None = None
     selected_vibes: list[str] | None = None
     categories: list[str] | None = None
-    supported_vibe_tags: set[str] = field(default_factory=lambda: {
-        "chill", "energetic", "intellectual", "romantic", "social",
-        "luxury", "live-music", "wellness", "late-night",
-    })
+    supported_vibe_tags: set[str] = field(default_factory=lambda: set(get_args(EventVibeTag)))
 
 
 class FeedQueryBuilder:
@@ -45,6 +47,15 @@ class FeedQueryBuilder:
         end_ts: datetime,
         eligible_statuses: list[str],
         seen_window_days: int,
+        latitude: float = 0,
+        longitude: float = 0,
+        radius_miles: float = 10,
+        categories: list[str] | None = None,
+        vibes: list[str] | None = None,
+        age: str = "all",
+        query: str | None = None,
+        time_of_day: str | None = None,
+        snapshot_ids: list[str] | None = None,
     ) -> None:
         self.session = session
         self.user_id = user_id
@@ -52,10 +63,22 @@ class FeedQueryBuilder:
         self.end_ts = end_ts
         self.eligible_statuses = eligible_statuses
         self.seen_window_days = seen_window_days
+        self._filter_params = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "radius": radius_miles * 1609.344,
+            "categories": categories or [],
+            "vibes": vibes or [],
+            "age": age,
+            "search": query or "",
+            "time_bucket": time_of_day or "",
+            "snapshot_ids": snapshot_ids or [],
+        }
+        self.snapshot = snapshot_ids is not None
         self._price_clause: str = ""
         self._query_params: dict[str, Any] = {}
 
-    def with_price_filter(self, price: str | None) -> "FeedQueryBuilder":
+    def with_price_filter(self, price: str | None) -> FeedQueryBuilder:
         """Add price filter (free/paid)."""
         if price in {"free", "paid"}:
             self._price_clause = "and e.is_free = :is_free"
@@ -68,7 +91,7 @@ class FeedQueryBuilder:
             "start_ts": self.start_ts,
             "end_ts": self.end_ts,
             "user_id": self.user_id,
-            "limit_rows": 100,  # Over-fetch for client-side filtering
+            **self._filter_params,
             "eligible_statuses": list(self.eligible_statuses),
             "seen_window_days": str(self.seen_window_days),
             **self._query_params,
@@ -76,6 +99,8 @@ class FeedQueryBuilder:
 
     def _build_seen_clause(self) -> str:
         """Build the seen events exclusion clause."""
+        if self.snapshot:
+            return "and e.id = any(cast(:snapshot_ids as uuid[]))"
         return """and not exists (
                 select 1
                 from public.feed_impressions seen
@@ -138,6 +163,24 @@ class FeedQueryBuilder:
             join next_occurrence no on no.event_id = e.id
             left join public.venues v on v.id = e.venue_id
             where e.hidden = false
+              and e.verification_status = 'verified'
+              and e.last_verified_active is true
+              and e.last_verified_at >= now() - interval '72 hours'
+              and no.starts_at >= now()
+              and v.country ilike 'US'
+              and v.location is not null
+              and extensions.st_dwithin(v.location,
+                extensions.st_setsrid(extensions.st_makepoint(:longitude,:latitude),4326)::extensions.geography,:radius)
+              and (cardinality(cast(:categories as text[]))=0 or e.category=any(cast(:categories as text[])))
+              and (cardinality(cast(:vibes as text[]))=0 or exists (
+                select 1 from public.event_tags t where t.event_id=e.id and t.tag=any(cast(:vibes as text[]))))
+              and (:age='all' or (e.admission_restriction=:age and e.admission_source_url is not null))
+              and (:search='' or strpos(lower(e.title || ' ' || coalesce(e.description,'') || ' ' || coalesce(v.name,'')),lower(:search))>0)
+              and (:time_bucket='' or case :time_bucket
+                when 'morning' then extract(hour from no.starts_at at time zone coalesce(no.timezone,'UTC')) >=5 and extract(hour from no.starts_at at time zone coalesce(no.timezone,'UTC')) <12
+                when 'afternoon' then extract(hour from no.starts_at at time zone coalesce(no.timezone,'UTC')) >=12 and extract(hour from no.starts_at at time zone coalesce(no.timezone,'UTC')) <17
+                when 'evening' then extract(hour from no.starts_at at time zone coalesce(no.timezone,'UTC')) >=17 and extract(hour from no.starts_at at time zone coalesce(no.timezone,'UTC')) <22
+                when 'night' then extract(hour from no.starts_at at time zone coalesce(no.timezone,'UTC')) >=22 or extract(hour from no.starts_at at time zone coalesce(no.timezone,'UTC')) <5 else false end)
               and e.verification_status = any(:eligible_statuses)
               and not exists (
                 select 1
@@ -147,8 +190,9 @@ class FeedQueryBuilder:
               )
               {seen_clause}
               {self._price_clause}
-            order by no.starts_at asc, e.created_at desc
-            limit :limit_rows
+            order by no.starts_at asc, e.created_at desc, e.id
+            limit 1000
+
             """
 
     async def fetch_user_weights(self) -> dict[str, float]:
@@ -196,12 +240,14 @@ class FeedQueryBuilder:
         )
         ticket_map: dict[str, list[dict[str, Any]]] = {eid: [] for eid in event_ids}
         for row in result.mappings().all():
-            ticket_map.setdefault(str(row["event_id"]), []).append({
-                "url": str(row["url"]),
-                "provider": row["provider"],
-                "priceLabel": row["price_label"],
-                "isFree": row["is_free"],
-            })
+            ticket_map.setdefault(str(row["event_id"]), []).append(
+                {
+                    "url": str(row["url"]),
+                    "provider": row["provider"],
+                    "priceLabel": row["price_label"],
+                    "isFree": row["is_free"],
+                }
+            )
         return ticket_map
 
     async def execute(self) -> FeedQueryResult:
@@ -236,11 +282,14 @@ class FeedItemFilter:
         self.context = context
 
     @staticmethod
-    def _haversine_miles(lat1: float, lon1: float, lat2: float | None, lon2: float | None) -> float | None:
+    def _haversine_miles(
+        lat1: float, lon1: float, lat2: float | None, lon2: float | None
+    ) -> float | None:
         """Calculate distance between two points in miles."""
         if lat2 is None or lon2 is None:
             return None
         from math import acos, cos, radians, sin
+
         return 3958.7613 * acos(
             min(
                 1.0,
@@ -253,17 +302,22 @@ class FeedItemFilter:
         )
 
     @staticmethod
-    def _time_of_day_matches(starts_at: datetime, bucket: str | None, venue_tz: str | None = None) -> bool:
+    def _time_of_day_matches(
+        starts_at: datetime, bucket: str | None, venue_tz: str | None = None
+    ) -> bool:
         """Check if event time matches the time-of-day bucket using local time."""
         if not bucket:
             return True
         # Use event's local timezone (or UTC if not available)
         from zoneinfo import ZoneInfo
-        tz = ZoneInfo(venue_tz) if venue_tz else timezone.utc
+
+        tz = ZoneInfo(venue_tz) if venue_tz else UTC
         try:
-            local_dt = starts_at.astimezone(tz) if starts_at.tzinfo else starts_at.replace(tzinfo=tz)
+            local_dt = (
+                starts_at.astimezone(tz) if starts_at.tzinfo else starts_at.replace(tzinfo=tz)
+            )
         except Exception:
-            local_dt = starts_at.replace(tzinfo=timezone.utc)
+            local_dt = starts_at.replace(tzinfo=UTC)
         hour = local_dt.hour
         buckets = {
             "morning": (5, 12),
@@ -285,14 +339,46 @@ class FeedItemFilter:
         tags: list[str],
     ) -> str:
         """Refine event category based on content analysis."""
-        text_content = f"{title or ''} {description or ''} {' '.join(vibes)} {' '.join(tags)}".lower()
+        text_content = (
+            f"{title or ''} {description or ''} {' '.join(vibes)} {' '.join(tags)}".lower()
+        )
 
         category_keywords = {
-            "concerts": ["concert", "music", "musica", "dj", "band", "live music", "orchestra", "opera", "recital"],
-            "dining": ["food", "dinner", "lunch", "brunch", "restaurant", "tasting", "cocktail", "wine", "bar"],
+            "concerts": [
+                "concert",
+                "music",
+                "musica",
+                "dj",
+                "band",
+                "live music",
+                "orchestra",
+                "opera",
+                "recital",
+            ],
+            "dining": [
+                "food",
+                "dinner",
+                "lunch",
+                "brunch",
+                "restaurant",
+                "tasting",
+                "cocktail",
+                "wine",
+                "bar",
+            ],
             "nightlife": ["party", "club", "nightclub", "dance"],
             "wellness": ["wellness", "yoga", "meditation", "fitness", "spa"],
-            "experiences": ["poetry", "poet", "literary", "reading", "book", "author", "lecture", "talk", "workshop"],
+            "experiences": [
+                "poetry",
+                "poet",
+                "literary",
+                "reading",
+                "book",
+                "author",
+                "lecture",
+                "talk",
+                "workshop",
+            ],
         }
 
         for cat, keywords in category_keywords.items():
@@ -300,7 +386,7 @@ class FeedItemFilter:
                 return cat
 
         normalized = (category or "").strip().lower()
-        valid_categories = {"nightlife", "dining", "concerts", "wellness", "experiences"}
+        valid_categories = set(get_args(EventCategory))
         if normalized in valid_categories:
             return normalized
         if "energetic" in vibes:
@@ -340,13 +426,7 @@ class FeedItemFilter:
         effective_vibes = event_vibes or ["social"]
 
         # Category refinement and filter
-        refined_category = self._refine_event_category(
-            row.get("category"),
-            row.get("title"),
-            row.get("description"),
-            effective_vibes,
-            tags,
-        )
+        refined_category = row.get("category") or "experiences"
         if self.context.categories and refined_category not in self.context.categories:
             return False, refined_category, effective_vibes, miles
 

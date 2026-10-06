@@ -7,11 +7,30 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from aventi_backend.core.settings import get_settings
 from aventi_backend.services.jobs import JobQueueRepository, JobType
 from aventi_backend.services.providers import MockVerifier, VerificationProvider
-from aventi_backend.core.settings import get_settings
 
-VERIFY_EVENT_COOLDOWN = timedelta(hours=6)
+VERIFY_EVENT_COOLDOWN = timedelta(hours=48)
+
+
+def _verification_details(
+    verifier: VerificationProvider, booking_url: str, *, reason: str | None = None
+) -> dict[str, Any]:
+    details: dict[str, Any] = {
+        "provider": verifier.__class__.__name__,
+        "bookingUrl": booking_url,
+    }
+    if reason is not None:
+        details["reason"] = reason
+
+    evidence = getattr(verifier, "last_evidence", None)
+    if isinstance(evidence, dict):
+        for key in ("sourceUrl", "supportingQuote", "providerReason", "httpStatus"):
+            value = evidence.get(key)
+            if isinstance(value, (str, int)):
+                details[key] = value
+    return details
 
 
 class VerificationService:
@@ -22,24 +41,31 @@ class VerificationService:
         verifier: VerificationProvider | None = None,
     ) -> None:
         self.session = session
+        self.verifier: VerificationProvider
         if verifier is None:
             settings = get_settings()
             if settings.google_api_key:
+                from aventi_backend.services.budgets import BudgetManager
                 from aventi_backend.services.gemini import GeminiVerifier
-                self.verifier = GeminiVerifier()
+
+                self.verifier = GeminiVerifier(BudgetManager(session))
+            elif settings.env in {"production", "staging"}:
+                raise RuntimeError("GOOGLE_API_KEY is required for production verification")
             else:
                 self.verifier = MockVerifier()
         else:
             self.verifier = verifier
 
-    async def enqueue_verification_jobs(self, limit: int = 20, *, event_ids: list[str] | None = None) -> int:
+    async def enqueue_verification_jobs(
+        self, limit: int = 20, *, event_ids: list[str] | None = None
+    ) -> int:
         now = datetime.now(tz=UTC)
         ids = event_ids
         if ids is None:
             result = await self.session.execute(
                 text(
                     """
-                    select distinct e.id::text as event_id
+                    select e.id::text as event_id
                     from public.events e
                     join public.event_occurrences eo on eo.event_id = e.id
                     where e.hidden = false
@@ -50,7 +76,8 @@ class VerificationService:
                         e.last_verified_at is null
                         or e.last_verified_at <= :verify_cutoff
                       )
-                    order by min(eo.starts_at) over (partition by e.id) asc
+                    group by e.id
+                    order by min(eo.starts_at) asc
                     limit :limit_rows
                     """
                 ),
@@ -73,7 +100,23 @@ class VerificationService:
                 ),
                 {"event_id": event_id},
             )
-            if isinstance(latest_verification, datetime) and latest_verification >= now - VERIFY_EVENT_COOLDOWN:
+            if (
+                isinstance(latest_verification, datetime)
+                and latest_verification >= now - VERIFY_EVENT_COOLDOWN
+            ):
+                continue
+            latest_job = await self.session.scalar(
+                text(
+                    """
+                    select max(created_at)
+                    from public.jobs
+                    where job_type = 'VERIFY_EVENT'
+                      and payload ->> 'eventId' = :event_id
+                    """
+                ),
+                {"event_id": event_id},
+            )
+            if isinstance(latest_job, datetime) and latest_job >= now - VERIFY_EVENT_COOLDOWN:
                 continue
             await repo.enqueue_job(JobType.VERIFY_EVENT, {"eventId": event_id})
             count += 1
@@ -111,29 +154,16 @@ class VerificationService:
                     "event_id": event_id,
                     "verified_at": verified_at,
                     "details_json": json.dumps(
-                        {
-                            "provider": self.verifier.__class__.__name__,
-                            "bookingUrl": booking_url,
-                            "reason": "indeterminate_verification_response",
-                        }
+                        _verification_details(
+                            self.verifier,
+                            booking_url,
+                            reason="indeterminate_verification_response",
+                        )
                     ),
                 },
             )
-            await self.session.execute(
-                text(
-                    """
-                    update public.events
-                    set last_verified_at = :last_verified_at,
-                        last_verified_active = null,
-                        updated_at = now()
-                    where id = :event_id
-                    """
-                ),
-                {
-                    "event_id": event_id,
-                    "last_verified_at": verified_at,
-                },
-            )
+            # An inconclusive attempt is audit evidence only. It cannot renew
+            # the last successful verification or extend feed eligibility.
             await self.session.commit()
             return {
                 "eventId": event_id,
@@ -149,7 +179,7 @@ class VerificationService:
         recent_inactive_failure = (
             isinstance(last_verified_at, datetime)
             and last_verified_active is False
-            and last_verified_at >= verified_at - timedelta(hours=24)
+            and last_verified_at >= verified_at - timedelta(hours=72)
         )
         if is_active:
             status = "verified"
@@ -170,9 +200,7 @@ class VerificationService:
                 "status": status,
                 "active": is_active,
                 "verified_at": verified_at,
-                "details_json": json.dumps(
-                    {"provider": self.verifier.__class__.__name__, "bookingUrl": booking_url}
-                ),
+                "details_json": json.dumps(_verification_details(self.verifier, booking_url)),
             },
         )
         await self.session.execute(

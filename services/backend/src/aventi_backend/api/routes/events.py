@@ -1,5 +1,4 @@
-from fastapi import APIRouter, Depends
-from fastapi import HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from aventi_backend.core.auth import AuthenticatedUser, require_user
@@ -25,4 +24,6 @@ async def report_event(
     try:
         return await repo.report_event(user.id, event_id, payload.reason, payload.details)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc

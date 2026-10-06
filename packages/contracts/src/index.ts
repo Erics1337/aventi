@@ -61,6 +61,11 @@ export interface EventCard {
 
 export interface FeedFilters {
   date: 'today' | 'tomorrow' | 'weekend' | 'week';
+  query?: string;
+  /** Inclusive ISO calendar date. When present it takes precedence over `date`. */
+  startDate?: string;
+  /** Inclusive ISO calendar date, at most 60 days after startDate. */
+  endDate?: string;
   timeOfDay?: 'morning' | 'afternoon' | 'evening' | 'night';
   price?: 'free' | 'paid' | 'any';
   radiusMiles?: number;
@@ -78,9 +83,18 @@ export interface FeedRequest {
   marketCity?: string;
   marketState?: string | null;
   marketCountry?: string | null;
+  /** Canonical destination id returned by /v1/destinations. */
+  destinationId?: string;
 }
 
-export type FeedInventoryStatus = 'ready' | 'warming' | 'targeted_warming' | 'no_matches';
+export type FeedInventoryStatus =
+  | 'ready'
+  | 'warming'
+  | 'targeted_warming'
+  | 'no_matches'
+  | 'budget_paused'
+  | 'unavailable'
+  | 'unsupported';
 
 export interface FeedResponse {
   items: EventCard[];
@@ -91,6 +105,8 @@ export interface FeedResponse {
   marketKey?: string | null;
   inventoryStatus: FeedInventoryStatus;
   warmupTriggered: boolean;
+  resetAt?: string | null;
+  retryAt?: string | null;
 }
 
 export interface FavoritesResponse {
@@ -99,11 +115,83 @@ export interface FavoritesResponse {
 }
 
 export interface SwipePayload {
+  /** Client-generated stable id used to make retries idempotent. */
+  actionId: string;
   eventId: string;
   action: SwipeAction;
   surfacedAt: string;
   position: number;
   vibes: EventVibeTag[];
+}
+
+export interface SwipeResponse {
+  accepted: true;
+  actionId: string;
+  favorite: boolean;
+  remainingFreeSwipes?: number;
+  remainingFreePreferenceActions?: number;
+  resetAt?: string | null;
+}
+
+export interface Destination {
+  id: string;
+  label: string;
+  city: string;
+  state: string;
+  country: 'US';
+  latitude: number;
+  longitude: number;
+  timezone?: string | null;
+}
+
+export interface DestinationsResponse {
+  items: Destination[];
+}
+
+export interface EventInsights {
+  status: 'ready' | 'pending' | 'unavailable';
+  reason?: string;
+  insight?: {
+    summary: string;
+    venueName?: string | null;
+    city?: string | null;
+    startsAt?: string | null;
+    insiderTips: string[];
+    sources: Array<{ label: string; url: string }>;
+    compatibleEvents?: Array<{
+      eventId: string;
+      title: string;
+      venueName?: string | null;
+      startsAt?: string | null;
+      bookingUrl?: string | null;
+    }>;
+    grounded: boolean;
+  };
+  generatedAt?: string | null;
+  expiresAt?: string | null;
+  jobId?: string | null;
+  retryAfterSeconds?: number;
+}
+
+export interface MembershipReconcilePayload {
+  appUserId: string;
+  customerInfo: {
+    originalAppUserId: string;
+    activeEntitlementIds: string[];
+    latestExpirationDate?: string | null;
+    managementUrl?: string | null;
+  };
+}
+
+export type MembershipReconcileResponse = MembershipEntitlements;
+
+export type AccountDeletionState = 'not_requested' | 'pending' | 'processing' | 'completed' | 'failed';
+
+export interface AccountDeletionStatus {
+  status: AccountDeletionState;
+  requestedAt?: string | null;
+  completedAt?: string | null;
+  retryAt?: string | null;
 }
 
 export interface FeedImpressionPayload {
@@ -143,6 +231,7 @@ export interface MeProfile {
 export type VibeWeightMap = Partial<Record<EventVibeTag, number>>;
 
 export interface MembershipEntitlements {
+  purchasesEnabled?: boolean;
   isPremium: boolean;
   plan: 'free' | 'unlimited';
   unlimitedSwipes: boolean;
@@ -150,6 +239,9 @@ export interface MembershipEntitlements {
   travelMode: boolean;
   insiderTips: boolean;
   validUntil?: string | null;
+  productIdentifier?: string | null;
+  status?: string | null;
+  managementUrl?: string | null;
 }
 
 export type AdminMarketHeatTier = 'hot' | 'warm' | 'cold';

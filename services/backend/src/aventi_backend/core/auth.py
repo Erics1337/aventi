@@ -75,7 +75,9 @@ async def _fetch_jwks(url: str) -> dict[str, dict[str, Any]]:
     return keys_by_kid
 
 
-async def _get_jwks_keys(settings: Settings, *, force_refresh: bool = False) -> dict[str, dict[str, Any]]:
+async def _get_jwks_keys(
+    settings: Settings, *, force_refresh: bool = False
+) -> dict[str, dict[str, Any]]:
     jwks_url = _resolve_jwks_url(settings)
     cached = _JWKS_CACHE.get(jwks_url)
     if (
@@ -94,19 +96,25 @@ def _get_unverified_claims(token: str) -> dict[str, Any]:
     try:
         return jwt.get_unverified_claims(token)
     except JWTError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+        ) from exc
 
 
 def _get_unverified_header(token: str) -> dict[str, Any]:
     try:
         return jwt.get_unverified_header(token)
     except JWTError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token header") from exc
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token header"
+        ) from exc
 
 
 async def _decode_and_verify_supabase_token(token: str, settings: Settings) -> dict[str, Any]:
     header = _get_unverified_header(token)
     alg = str(header.get("alg", "RS256"))
+    if alg not in {"RS256", "ES256", "HS256"}:
+        raise HTTPException(status_code=401, detail="Unsupported signing algorithm")
     issuer = _resolve_issuer(settings)
 
     # Try JWKS fetch/caching first when configured, even for local Supabase (which may return empty keys).
@@ -172,7 +180,9 @@ async def _decode_and_verify_supabase_token(token: str, settings: Settings) -> d
     if not kid:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing kid")
 
-    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown token signing key")
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown token signing key"
+    )
 
 
 async def require_user(
@@ -195,6 +205,30 @@ async def require_user(
     if not sub:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing sub")
 
+    from uuid import UUID
+
+    try:
+        sub = str(UUID(str(sub)))
+    except ValueError:
+        raise HTTPException(401, "Invalid account identifier") from None
+    from sqlalchemy import text
+
+    from aventi_backend.db.session import open_db_session
+
+    async with open_db_session() as session:
+        deleted = await session.scalar(
+            text("select exists(select 1 from public.account_deletions where user_id=:user)"),
+            {"user": sub},
+        )
+    deletion_access = request.url.path == "/v1/me/deletion" or (
+        request.method == "DELETE" and request.url.path == "/v1/me"
+    )
+    if deleted and not deletion_access:
+        raise HTTPException(410, "Account deletion requested")
+    if settings.env != "test":
+        from aventi_backend.core.limits import enforce_limit
+
+        await enforce_limit(f"user:{sub}", settings.request_limit_per_minute)
     request.state.user_id = sub
     request.state.auth_claims = claims
     role = _resolve_claim_role(claims)
@@ -207,42 +241,25 @@ async def require_user(
 
 
 def _resolve_claim_role(claims: dict[str, Any]) -> str:
-    app_metadata = claims.get("app_metadata")
-    user_metadata = claims.get("user_metadata")
-    for value in (
-        claims.get("role"),
-        app_metadata.get("role") if isinstance(app_metadata, dict) else None,
-        user_metadata.get("role") if isinstance(user_metadata, dict) else None,
-    ):
-        if isinstance(value, str) and value.strip():
-            return value
-    return "authenticated"
+    metadata = claims.get("app_metadata")
+    role = metadata.get("role") if isinstance(metadata, dict) else None
+    return role if isinstance(role, str) else "authenticated"
 
 
 def _claims_include_admin(claims: dict[str, Any]) -> bool:
-    app_metadata = claims.get("app_metadata")
-    user_metadata = claims.get("user_metadata")
-    candidates: list[Any] = [
-        claims.get("role"),
-        claims.get("roles"),
-        app_metadata.get("role") if isinstance(app_metadata, dict) else None,
-        app_metadata.get("roles") if isinstance(app_metadata, dict) else None,
-        app_metadata.get("is_admin") if isinstance(app_metadata, dict) else None,
-        user_metadata.get("role") if isinstance(user_metadata, dict) else None,
-        user_metadata.get("roles") if isinstance(user_metadata, dict) else None,
-        user_metadata.get("is_admin") if isinstance(user_metadata, dict) else None,
-    ]
-    for candidate in candidates:
-        if candidate is True:
-            return True
-        if isinstance(candidate, str) and candidate.lower() in {"admin", "aventi_admin", "owner"}:
-            return True
-        if isinstance(candidate, list) and any(
-            isinstance(item, str) and item.lower() in {"admin", "aventi_admin", "owner"}
-            for item in candidate
-        ):
-            return True
-    return False
+    metadata = claims.get("app_metadata")
+    if not isinstance(metadata, dict):
+        return False
+    if metadata.get("is_admin") is True:
+        return True
+    role = metadata.get("role")
+    if isinstance(role, str) and role.lower() in {"admin", "aventi_admin", "owner"}:
+        return True
+    roles = metadata.get("roles")
+    return isinstance(roles, list) and any(
+        isinstance(item, str) and item.lower() in {"admin", "aventi_admin", "owner"}
+        for item in roles
+    )
 
 
 async def require_admin_user(user: AuthenticatedUser = Depends(require_user)) -> AuthenticatedUser:
@@ -254,4 +271,6 @@ async def require_admin_user(user: AuthenticatedUser = Depends(require_user)) ->
 def require_internal_api_key(request: Request, settings: Settings = Depends(get_settings)) -> None:
     provided = request.headers.get("x-aventi-internal-key")
     if not settings.internal_api_key or provided != settings.internal_api_key:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal API key")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal API key"
+        )

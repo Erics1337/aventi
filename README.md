@@ -1,5 +1,7 @@
 # Aventi
 
+For the public mobile release, use [the launch readiness guide](docs/launch-readiness.md). It defines current subscription, security, configuration, and release gates; older architecture notes below describe the bootstrap history.
+
 Aventi is a premium, swipe-first discovery app for local events, nightlife, and experiences.
 
 This repository is a Turborepo monorepo containing:

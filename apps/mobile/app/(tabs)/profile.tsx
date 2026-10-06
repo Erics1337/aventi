@@ -1,17 +1,28 @@
 import { router } from 'expo-router';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { RANKING_CONSTANTS } from '@aventi/contracts';
 
+import { MembershipPlans } from '../../components/MembershipPlans';
 import { GlassPanel } from '../../components/GlassPanel';
 import { aventiApi } from '../../lib/api';
 import { useAuthSession } from '../../lib/auth-session';
 import { useLocationGate } from '../../lib/location-gate';
+import {
+  getMembershipManagementUrl,
+  isRevenueCatConfigured,
+  loadMembershipOffering,
+  purchaseMembership,
+  restoreMembership,
+  type MembershipOffer,
+} from '../../lib/revenuecat';
+import { pendingSwipeQueue } from '../../lib/swipe-queue';
 
 export default function ProfileScreen() {
   const auth = useAuthSession();
   const location = useLocationGate();
+  const queryClient = useQueryClient();
 
   const appUnlocked = auth.isReady && auth.isAuthenticated;
   const serverCallsEnabled = appUnlocked;
@@ -21,6 +32,50 @@ export default function ProfileScreen() {
     enabled: serverCallsEnabled,
     queryFn: () => aventiApi.bootstrapMe(),
     staleTime: 60_000,
+  });
+
+  const entitlementsQuery = useQuery({
+    queryKey: ['membership', 'entitlements', auth.session?.user.id ?? 'no-session'],
+    enabled: auth.isFullAccount,
+    queryFn: () => aventiApi.getEntitlements(),
+  });
+
+  const offeringQuery = useQuery({
+    queryKey: ['membership', 'offering', auth.session?.user.id ?? 'no-session'],
+    enabled: auth.isFullAccount && isRevenueCatConfigured() && entitlementsQuery.data?.purchasesEnabled === true,
+    queryFn: () => loadMembershipOffering(auth.session!.user.id),
+  });
+
+  const deletionQuery = useQuery({
+    queryKey: ['me', 'deletion', auth.session?.user.id ?? 'no-session'],
+    enabled: auth.isFullAccount,
+    queryFn: () => aventiApi.getAccountDeletionStatus(),
+    refetchInterval: (query) => ['pending', 'processing'].includes(query.state.data?.status ?? '') ? 5_000 : false,
+  });
+
+  const purchaseMutation = useMutation({
+    mutationFn: (offer: MembershipOffer) => purchaseMembership(auth.session!.user.id, offer),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['membership'] }),
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: () => restoreMembership(auth.session!.user.id),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['membership'] }),
+  });
+
+  const deletionMutation = useMutation({
+    mutationFn: () => aventiApi.requestAccountDeletion(),
+    onSuccess: async (status) => {
+      const userId = auth.session!.user.id;
+      await pendingSwipeQueue.clearAccount(userId);
+      queryClient.setQueryData(['me', 'deletion', userId], status);
+      if (status.status === 'completed') {
+        queryClient.removeQueries({ queryKey: ['event-insights'] });
+        queryClient.removeQueries({ queryKey: ['favorites'] });
+        queryClient.removeQueries({ queryKey: ['membership'] });
+        await auth.signOut();
+      }
+    },
   });
 
   const feedQuery = useQuery<{
@@ -35,7 +90,7 @@ export default function ProfileScreen() {
       'week',
       undefined,
       'any',
-      25,
+      10,
       null,
       'server',
     ],
@@ -67,12 +122,20 @@ export default function ProfileScreen() {
   const statusLine = !appUnlocked
     ? 'Choose guest mode or sign in to begin discovery'
     : !location.effectiveLocation
-      ? location.errorMessage ?? 'Choose device or travel coordinates to initialize your local feed'
+      ? location.errorMessage ?? 'Choose device location or a travel destination to initialize your local feed'
       : `${remainingActions} free preference actions left today • ${location.effectiveLocation.label}`;
 
-  const handleAuthAction = () => {
+  const handleAuthAction = async () => {
     if (auth.isFullAccount) {
-      void auth.signOut();
+      try {
+        await auth.signOut();
+        queryClient.removeQueries({ queryKey: ['event-insights'] });
+        queryClient.removeQueries({ queryKey: ['favorites'] });
+        queryClient.removeQueries({ queryKey: ['membership'] });
+        queryClient.removeQueries({ queryKey: ['me'] });
+      } catch (error) {
+        Alert.alert('Sign out failed', error instanceof Error ? error.message : 'Please try again.');
+      }
       return;
     }
     auth.openAuthPrompt(auth.isAnonymousUser ? 'sync' : 'welcome');
@@ -84,12 +147,30 @@ export default function ProfileScreen() {
 
   const handlePremiumPurchase = () => {
     if (!auth.requireFullAccount('premium-purchase')) return;
-    // Premium purchase flow stub (Stripe is deferred in PRD v1)
+    void offeringQuery.refetch();
   };
 
   const handlePremiumRestore = () => {
     if (!auth.requireFullAccount('premium-restore')) return;
-    // Premium restore flow stub
+    restoreMutation.mutate();
+  };
+
+  const handleManageSubscription = async () => {
+    if (!auth.requireFullAccount('premium')) return;
+    try {
+      const url = await getMembershipManagementUrl(auth.session!.user.id);
+      if (!url) throw new Error('No active subscription management link was returned.');
+      await Linking.openURL(url);
+    } catch (error) {
+      Alert.alert('Manage subscription', error instanceof Error ? error.message : 'Could not open subscription management.');
+    }
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert('Delete Aventi account?', 'This deletes your profile, favorites, and membership link. Store subscriptions continue until cancelled separately through Manage subscription.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete account', style: 'destructive', onPress: () => deletionMutation.mutate() },
+    ]);
   };
 
   return (
@@ -122,7 +203,7 @@ export default function ProfileScreen() {
             </View>
             <View className="gap-2">
               <Pressable
-                onPress={handleAuthAction}
+                onPress={() => void handleAuthAction()}
                 className="px-4 py-3 rounded-full border border-white/15 bg-white/10 active:scale-95"
               >
                 <Text className="text-xs font-semibold uppercase tracking-[1.5px] text-white">
@@ -131,25 +212,23 @@ export default function ProfileScreen() {
               </Pressable>
             </View>
           </View>
-          <View className="flex-row gap-2 mt-4">
-            <Pressable
-              onPress={handlePremiumPurchase}
-              className="flex-1 rounded-2xl border border-white/20 bg-white/10 px-4 py-3 active:scale-[0.99]"
-            >
-              <Text className="text-center text-[11px] font-semibold uppercase tracking-[1.2px] text-white">
-                Premium Upgrade
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={handlePremiumRestore}
-              className="flex-1 rounded-2xl border border-white/15 bg-white/5 px-4 py-3 active:scale-[0.99]"
-            >
-              <Text className="text-center text-[11px] font-semibold uppercase tracking-[1.2px] text-white/90">
-                Restore Premium
-              </Text>
-            </Pressable>
-          </View>
+          <MembershipPlans offers={offeringQuery.data?.offers ?? []} enabled={entitlementsQuery.data?.purchasesEnabled === true} loading={entitlementsQuery.isLoading} busy={purchaseMutation.isPending || restoreMutation.isPending} onPurchase={offer => purchaseMutation.mutate(offer)} onLoad={handlePremiumPurchase} onRestore={handlePremiumRestore} onManage={() => void handleManageSubscription()} />
+          {entitlementsQuery.data ? <Text className="mt-3 text-xs text-white/60">{entitlementsQuery.data.isPremium ? 'Unlimited is active.' : 'Free plan active.'}</Text> : null}
+          {purchaseMutation.isPending || restoreMutation.isPending ? <Text className="mt-2 text-xs text-white/55">Confirming with your store…</Text> : null}
+          {offeringQuery.isError || purchaseMutation.isError || restoreMutation.isError ? <Text className="mt-2 text-xs text-rose-300">{(purchaseMutation.error ?? restoreMutation.error ?? offeringQuery.error)?.message ?? 'Membership request failed.'}</Text> : null}
+          {!isRevenueCatConfigured() ? <Text className="mt-2 text-xs text-amber-200/80">Purchases are unavailable in this build.</Text> : null}
         </GlassPanel>
+
+        {auth.isFullAccount ? (
+          <GlassPanel className="mb-4">
+            <Text className="text-xs uppercase tracking-[2px] text-white/60">Account deletion</Text>
+            <Text className="mt-2 text-sm leading-5 text-white/65">Status: {deletionQuery.data?.status ?? 'not requested'}</Text>
+            {deletionMutation.isError ? <Text className="mt-2 text-xs text-rose-300">{deletionMutation.error.message}</Text> : null}
+            <Pressable disabled={deletionMutation.isPending || ['pending', 'processing', 'completed'].includes(deletionQuery.data?.status ?? '')} onPress={handleDeleteAccount} className="mt-4 rounded-2xl border border-rose-300/30 bg-rose-400/10 px-4 py-3 disabled:opacity-40">
+              <Text className="text-center text-xs font-semibold uppercase tracking-[1.4px] text-rose-200">{deletionMutation.isPending ? 'Scheduling deletion…' : 'Delete account'}</Text>
+            </Pressable>
+          </GlassPanel>
+        ) : null}
 
         {/* Discovery Status Panel */}
         <GlassPanel className="mb-4">

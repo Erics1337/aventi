@@ -66,13 +66,29 @@ async def mark_market_seen(
     user: AuthenticatedUser = Depends(require_user),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """Record that a user is active in a market.
+    """Record activity for an existing market; this endpoint never buys discovery."""
+    from sqlalchemy import text
 
-    If the market is not yet tracked, bootstraps a ``market_inventory_state``
-    row with ``heat_tier='warm'`` and immediately enqueues a single short-term
-    MARKET_SCAN job. Idempotent on repeat calls: just bumps
-    ``last_user_active_at``.
-    """
+    profile = (
+        (
+            await session.execute(
+                text("select latitude,longitude from public.profiles where id=:id"), {"id": user.id}
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if (
+        (payload.country or "US").upper() != "US"
+        or not profile
+        or profile["latitude"] is None
+        or profile["longitude"] is None
+        or payload.latitude is None
+        or payload.longitude is None
+        or abs(float(profile["latitude"]) - payload.latitude) > 0.05
+        or abs(float(profile["longitude"]) - payload.longitude) > 0.05
+    ):
+        raise HTTPException(403, "Activity must match your saved device location")
     market = build_market_descriptor(
         city=payload.city,
         state=payload.state,
@@ -83,14 +99,11 @@ async def mark_market_seen(
     if market is None:
         raise HTTPException(status_code=400, detail="city is required")
 
-    # `user` arg is unused inside the service — we just need auth to pass.
-    _ = user
-
     service = MarketWarmupService(session)
-    bootstrapped = await service.bootstrap_market_if_new(market)
     await service.mark_user_active(market)
+    await session.commit()
     return {
         "ok": True,
         "marketKey": market.key,
-        "bootstrapped": bootstrapped,
+        "bootstrapped": False,
     }
